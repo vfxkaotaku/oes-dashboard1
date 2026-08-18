@@ -15,15 +15,15 @@ function App() {
           <div className="max-w-6xl mx-auto px-4 md:px-6 py-3.5 flex items-center justify-between">
             
             {/* Logo & Product Name */}
-            <Link to="/" className="group">
-              <div className="bg-white rounded-xl shadow-sm transition-transform group-hover:scale-105 flex items-center" style={{ padding: '6px 16px', height: '48px' }}>
-                <img src={`${import.meta.env.BASE_URL}logo.png`} alt="ONE EARTH Solar" style={{ height: '28px', width: 'auto', objectFit: 'contain' }} />
+            <Link to="/" className="group flex-shrink-0">
+              <div className="bg-white rounded-lg shadow-sm transition-transform group-hover:scale-[1.02] flex items-center px-3 md:px-4 py-1.5 md:h-12 h-10">
+                <img src={`${import.meta.env.BASE_URL}logo.png`} alt="ONE EARTH Solar" className="h-5 md:h-7 w-auto object-contain" />
                 
                 {/* Vertical Divider */}
-                <div className="bg-slate-200" style={{ width: '2px', height: '24px', margin: '0 12px', borderRadius: '1px' }}></div>
+                <div className="bg-slate-200 w-[1px] h-4 md:h-6 mx-2 md:mx-3"></div>
                 
                 {/* Product Name */}
-                <div style={{ color: '#0F172A', fontWeight: 800, fontSize: '0.9rem', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+                <div className="text-slate-900 font-extrabold text-[0.65rem] md:text-sm tracking-wide uppercase">
                   Data Logger
                 </div>
               </div>

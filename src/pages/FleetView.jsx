@@ -244,113 +244,185 @@ export default function FleetView() {
     <div className="space-y-6">
       
       {/* 1. FLEET SUMMARY KPI BANNER */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-oes-green flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Fleet Power</div>
-            <div className="text-2xl font-black text-slate-800 mt-1">{totalFleetKw.toFixed(1)} <span className="text-sm font-semibold text-slate-500">kW</span></div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] flex flex-col md:flex-row md:items-center justify-between gap-3 transition-transform hover:-translate-y-1">
+          <div className="order-2 md:order-1">
+            <div className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider">Total Power</div>
+            <div className="text-xl md:text-2xl font-black text-slate-800 mt-0.5 md:mt-1">{totalFleetKw.toFixed(1)} <span className="text-xs md:text-sm font-semibold text-slate-400">kW</span></div>
           </div>
-          <div className="bg-oes-green/20 text-oes-blue p-3 rounded-xl">
-            <Zap className="w-6 h-6 text-oes-blue" />
-          </div>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-oes-blue flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Today's Generation</div>
-            <div className="text-2xl font-black text-slate-800 mt-1">{totalFleetKwh.toFixed(1)} <span className="text-sm font-semibold text-slate-500">kWh</span></div>
-          </div>
-          <div className="bg-oes-blue/10 text-oes-blue p-3 rounded-xl">
-            <Sun className="w-6 h-6 text-oes-blue" />
+          <div className="order-1 md:order-2 bg-gradient-to-br from-oes-green/30 to-oes-green/10 text-oes-blue p-2.5 md:p-3 rounded-xl self-start md:self-auto">
+            <Zap className="w-5 h-5 md:w-6 md:h-6 text-oes-blue" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-emerald-500 flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Active Loggers</div>
-            <div className="text-2xl font-black text-slate-800 mt-1">{onlineCount} <span className="text-sm font-semibold text-slate-400">/ {devices.length}</span></div>
+        <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] flex flex-col md:flex-row md:items-center justify-between gap-3 transition-transform hover:-translate-y-1">
+          <div className="order-2 md:order-1">
+            <div className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider">Today's Energy</div>
+            <div className="text-xl md:text-2xl font-black text-slate-800 mt-0.5 md:mt-1">{totalFleetKwh.toFixed(1)} <span className="text-xs md:text-sm font-semibold text-slate-400">kWh</span></div>
           </div>
-          <div className="bg-emerald-50 text-emerald-600 p-3 rounded-xl">
-            <Server className="w-6 h-6" />
+          <div className="order-1 md:order-2 bg-gradient-to-br from-blue-100 to-blue-50 text-oes-blue p-2.5 md:p-3 rounded-xl self-start md:self-auto">
+            <Sun className="w-5 h-5 md:w-6 md:h-6 text-oes-blue" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm border-l-4 border-l-oes-orange flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Cloud Broker</div>
-            <div className="text-sm font-semibold text-slate-800 mt-1">broker.emqx.io</div>
-            <div className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-0.5">
+        <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] flex flex-col md:flex-row md:items-center justify-between gap-3 transition-transform hover:-translate-y-1">
+          <div className="order-2 md:order-1">
+            <div className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider">Active Loggers</div>
+            <div className="text-xl md:text-2xl font-black text-slate-800 mt-0.5 md:mt-1">{onlineCount} <span className="text-xs md:text-sm font-semibold text-slate-400">/ {devices.length}</span></div>
+          </div>
+          <div className="order-1 md:order-2 bg-gradient-to-br from-emerald-100 to-emerald-50 text-emerald-600 p-2.5 md:p-3 rounded-xl self-start md:self-auto">
+            <Server className="w-5 h-5 md:w-6 md:h-6" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] flex flex-col md:flex-row md:items-center justify-between gap-3 transition-transform hover:-translate-y-1">
+          <div className="order-2 md:order-1">
+            <div className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider">Cloud Broker</div>
+            <div className="text-xs md:text-sm font-semibold text-slate-800 mt-0.5 md:mt-1 truncate max-w-[100px] md:max-w-none">EMQX Cloud</div>
+            <div className="text-[9px] md:text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-0.5 md:mt-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Connected
             </div>
           </div>
-          <div className="bg-oes-orange/20 text-oes-orange p-3 rounded-xl">
-            <Activity className="w-6 h-6 text-oes-orange" />
+          <div className="order-1 md:order-2 bg-gradient-to-br from-orange-100 to-orange-50 text-orange-600 p-2.5 md:p-3 rounded-xl self-start md:self-auto">
+            <Activity className="w-5 h-5 md:w-6 md:h-6 text-orange-600" />
           </div>
         </div>
       </div>
       
       {/* 2. SEARCH & FILTER BAR */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-3 flex-1">
-          <div className="relative flex-1 max-w-md">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)]">
+        <div className="flex flex-col md:flex-row md:items-center gap-3 flex-1">
+          <div className="relative flex-1 max-w-full md:max-w-md">
             <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Search by Device ID, Client, Site or Location..." 
-              className="pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-oes-blue w-full text-sm font-medium bg-slate-50"
+              placeholder="Search Device ID, Client..." 
+              className="pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-oes-blue focus:ring-1 focus:ring-oes-blue w-full text-sm font-medium bg-slate-50/50 transition-all"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
           </div>
 
           {/* Status Filter Tabs */}
-          <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
+          <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold self-start w-full md:w-auto overflow-x-auto hide-scrollbar">
             <button 
               onClick={() => setFilterStatus('all')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${filterStatus === 'all' ? 'bg-white text-oes-blue shadow-sm' : 'text-slate-500'}`}
+              className={`flex-1 md:flex-none px-4 py-2 rounded-lg transition-all whitespace-nowrap ${filterStatus === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
-              All ({devices.length})
+              All
             </button>
             <button 
               onClick={() => setFilterStatus('online')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${filterStatus === 'online' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}
+              className={`flex-1 md:flex-none px-4 py-2 rounded-lg transition-all whitespace-nowrap ${filterStatus === 'online' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
-              Online ({onlineCount})
+              Online
             </button>
             <button 
               onClick={() => setFilterStatus('offline')}
-              className={`px-3 py-1.5 rounded-lg transition-all ${filterStatus === 'offline' ? 'bg-white text-rose-700 shadow-sm' : 'text-slate-500'}`}
+              className={`flex-1 md:flex-none px-4 py-2 rounded-lg transition-all whitespace-nowrap ${filterStatus === 'offline' ? 'bg-white text-rose-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
-              Offline ({devices.length - onlineCount})
+              Offline
             </button>
           </div>
         </div>
 
         <button 
           onClick={handleOpenAddModal}
-          className="bg-oes-blue hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md shadow-oes-blue/20 transition-all transform active:scale-95"
+          className="bg-oes-blue hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-oes-blue/20 transition-all active:scale-95 w-full md:w-auto"
         >
-          <Plus className="w-4 h-4 text-oes-green" /> Add Data Logger
+          <Plus className="w-4 h-4 text-oes-green" /> Add Logger
         </button>
       </div>
 
-      {/* 3. MULTI-LOGGER DATA TABLE */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
+      {/* 3. MULTI-LOGGER DATA TABLE (Cards on mobile, Table on desktop) */}
+      <div className="bg-white rounded-2xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border border-slate-100 overflow-hidden">
+        
+        {/* Mobile View: Cards */}
+        <div className="block md:hidden divide-y divide-slate-100">
+          {filtered.length === 0 ? (
+            <div className="p-8 text-center text-slate-500 text-sm">No loggers found.</div>
+          ) : (
+            filtered.map(dev => {
+              const live = liveData[dev.serial_number];
+              let liveKw = '--';
+              let todayKwh = '--';
+              
+              if (live && live.inv) {
+                const totalKw = live.inv.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0) / 1000;
+                liveKw = totalKw.toFixed(2);
+                const totalKwh = live.inv.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0);
+                todayKwh = totalKwh.toFixed(1);
+              } else if (live) {
+                liveKw = ((parseFloat(live.ac_w) || 0) / 1000).toFixed(2);
+                todayKwh = (parseFloat(live.e_day) || 0).toFixed(1);
+              }
+
+              const isOnline = dev.status === 'online';
+
+              return (
+                <div 
+                  key={dev.serial_number}
+                  onClick={() => navigate(`/device/${dev.serial_number}`)}
+                  className="p-4 hover:bg-slate-50 cursor-pointer transition-colors"
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <div className="font-bold text-slate-800 text-sm mb-0.5">{dev.client_name || 'Solar Client'}</div>
+                      <span className="font-mono text-xs font-bold text-oes-blue bg-oes-blue/5 px-2 py-0.5 rounded-md">
+                        {dev.serial_number}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
+                      <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></div>
+                      <span className={`text-[10px] font-bold uppercase ${isOnline ? 'text-emerald-700' : 'text-slate-400'}`}>
+                        {isOnline ? 'Online' : 'Offline'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 mb-3 bg-slate-50/50 p-3 rounded-xl border border-slate-100/50">
+                    <div>
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Live Output</div>
+                      <div className="font-bold text-slate-800">{liveKw} <span className="text-xs font-normal text-slate-500">kW</span></div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Today</div>
+                      <div className="font-bold text-slate-800">{todayKwh} <span className="text-xs font-normal text-slate-500">kWh</span></div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center text-xs text-slate-500">
+                    <div className="flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-slate-400" />
+                      <span className="truncate max-w-[120px]">{dev.site_name || 'Main Plant'}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={(e) => handleOpenEditModal(dev, e)} className="p-1.5 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-lg transition-colors"><Edit className="w-4 h-4" /></button>
+                      <button onClick={(e) => handleDeleteDevice(dev.serial_number, e)} className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop View: Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
-                <th className="p-4 font-bold">Status</th>
-                <th className="p-4 font-bold">Device ID</th>
-                <th className="p-4 font-bold">Client & Site</th>
-                <th className="p-4 font-bold">Inverter Model</th>
-                <th className="p-4 font-bold text-right">Live Output</th>
-                <th className="p-4 font-bold text-right">Today (kWh)</th>
-                <th className="p-4 font-bold text-right">Heartbeat</th>
-                <th className="p-4 text-center">Actions</th>
+              <tr className="bg-slate-50/50 border-b border-slate-100 text-slate-400 text-xs uppercase tracking-widest font-semibold">
+                <th className="p-4 pl-6">Status</th>
+                <th className="p-4">Device ID</th>
+                <th className="p-4">Client & Site</th>
+                <th className="p-4">Inverter Model</th>
+                <th className="p-4 text-right">Live Output</th>
+                <th className="p-4 text-right">Today (kWh)</th>
+                <th className="p-4 text-right">Heartbeat</th>
+                <th className="p-4 pr-6 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-50">
               {filtered.map(dev => {
                 const live = liveData[dev.serial_number];
                 let liveKw = '--';
@@ -374,63 +446,53 @@ export default function FleetView() {
                     className="hover:bg-slate-50/80 cursor-pointer transition-colors group"
                     onClick={() => navigate(`/device/${dev.serial_number}`)}
                   >
-                    <td className="p-4">
+                    <td className="p-4 pl-6">
                       <div className="flex items-center gap-2">
-                        <div className={`w-3 h-3 rounded-full ${isOnline ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50 animate-pulse' : 'bg-slate-300'}`}></div>
-                        <span className={`text-xs font-bold capitalize ${isOnline ? 'text-emerald-700' : 'text-slate-400'}`}>
+                        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)] animate-pulse' : 'bg-slate-300'}`}></div>
+                        <span className={`text-xs font-bold uppercase tracking-wider ${isOnline ? 'text-emerald-700' : 'text-slate-400'}`}>
                           {isOnline ? 'Online' : 'Offline'}
                         </span>
                       </div>
                     </td>
 
                     <td className="p-4">
-                      <span className="font-mono font-bold text-oes-blue text-sm">{dev.serial_number}</span>
+                      <span className="font-mono font-bold text-slate-800 text-sm bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">{dev.serial_number}</span>
                     </td>
 
                     <td className="p-4">
-                      <div className="font-bold text-slate-800 text-sm">{dev.client_name || 'Solar Client'}</div>
-                      <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                      <div className="font-bold text-slate-900 text-sm">{dev.client_name || 'Solar Client'}</div>
+                      <div className="text-xs text-slate-500 flex items-center gap-1.5 mt-1">
                         <span>{dev.site_name || 'Main Plant'}</span>
-                        <span>•</span>
-                        <span className="flex items-center gap-0.5"><MapPin className="w-3 h-3" /> {dev.location || 'Maharashtra'}</span>
+                        <span className="text-slate-300">•</span>
+                        <span className="flex items-center gap-0.5"><MapPin className="w-3 h-3 text-slate-400" /> {dev.location || 'Maharashtra'}</span>
                       </div>
                     </td>
 
                     <td className="p-4">
-                      <div className="text-xs font-semibold text-slate-700">{dev.inverter_model || 'Polycab 50 kW'}</div>
-                      <div className="text-[11px] text-slate-400">{dev.capacity_kw || 50} kWp Rated</div>
+                      <div className="text-sm font-medium text-slate-700">{dev.inverter_model || 'Polycab 50 kW'}</div>
+                      <div className="text-xs text-slate-400 mt-1">{dev.capacity_kw} kW Capacity</div>
                     </td>
 
                     <td className="p-4 text-right">
-                      <div className="font-black text-base text-slate-800">
-                        {liveKw !== '--' ? `${liveKw} kW` : '--'}
-                      </div>
+                      <div className="font-black text-slate-800 text-base">{liveKw}</div>
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase mt-0.5">kW</div>
                     </td>
 
                     <td className="p-4 text-right">
-                      <div className="font-bold text-sm text-oes-blue">
-                        {todayKwh !== '--' ? `${todayKwh} kWh` : '--'}
-                      </div>
+                      <div className="font-black text-oes-blue text-base">{todayKwh}</div>
+                      <div className="text-[10px] font-semibold text-slate-400 uppercase mt-0.5">kWh</div>
                     </td>
 
-                    <td className="p-4 text-right text-xs text-slate-400 font-medium">
-                      {formatTimeAgo(dev.serial_number)}
+                    <td className="p-4 text-right">
+                      <div className="text-xs font-medium text-slate-500">{formatTimeAgo(dev.serial_number)}</div>
                     </td>
 
-                    <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-1" onClick={e => e.stopPropagation()}>
-                        <button 
-                          onClick={(e) => handleOpenEditModal(dev, e)}
-                          title="Edit Site Metadata"
-                          className="p-1.5 text-slate-400 hover:text-oes-blue hover:bg-slate-100 rounded-lg transition-colors"
-                        >
+                    <td className="p-4 pr-6 text-center">
+                      <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={(e) => handleOpenEditModal(dev, e)} className="p-2 hover:bg-white hover:shadow-sm hover:text-blue-600 text-slate-400 rounded-xl transition-all border border-transparent hover:border-slate-200" title="Edit Device">
                           <Edit className="w-4 h-4" />
                         </button>
-                        <button 
-                          onClick={(e) => handleDeleteDevice(dev.serial_number, e)}
-                          title="Remove Data Logger"
-                          className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
-                        >
+                        <button onClick={(e) => handleDeleteDevice(dev.serial_number, e)} className="p-2 hover:bg-white hover:shadow-sm hover:text-rose-600 text-slate-400 rounded-xl transition-all border border-transparent hover:border-slate-200" title="Remove Device">
                           <Trash2 className="w-4 h-4" />
                         </button>
                         <button 

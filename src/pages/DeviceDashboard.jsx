@@ -199,33 +199,34 @@ export default function DeviceDashboard() {
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-800 pb-20">
       
       {/* 1. TOP NAV & CONTROLS (App Aesthetic) */}
-      <div className="bg-oes-blue text-white pt-10 pb-8 px-6 md:px-12 shadow-md rounded-b-3xl relative">
-        <div className="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="bg-oes-blue text-white pt-6 md:pt-10 pb-6 md:pb-8 px-4 md:px-12 shadow-lg rounded-b-3xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-20 -mt-20 pointer-events-none"></div>
+        <div className="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
           <div>
             <button 
               onClick={() => navigate('/')} 
-              className="flex items-center gap-2 text-white/80 hover:text-white mb-4 transition-colors font-medium text-sm"
+              className="flex items-center gap-2 text-white/80 hover:text-white mb-3 md:mb-4 transition-colors font-medium text-xs md:text-sm"
             >
               <ArrowLeft className="w-4 h-4" /> Back to Fleet Overview
             </button>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Activity className="w-6 h-6" /> {device.client_name || 'Solar Site'}
+            <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
+              <Activity className="w-5 h-5 md:w-6 md:h-6" /> {device.client_name || 'Solar Site'}
             </h1>
-            <p className="text-white/80 mt-1 text-sm">
+            <p className="text-white/80 mt-1 text-xs md:text-sm font-medium">
               {device.serial_number} • {device.site_name}
             </p>
           </div>
           
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-2 md:gap-3 w-full md:w-auto mt-2 md:mt-0">
             <button 
               onClick={() => { setEditForm({ ...device }); setShowEditModal(true); }}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-colors text-white font-semibold text-sm"
+              className="flex-1 md:flex-none flex items-center justify-center gap-1.5 md:gap-2 p-2.5 md:p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-colors text-white font-semibold text-xs md:text-sm"
             >
               <Edit className="w-4 h-4" /> Edit Site
             </button>
             <button 
               onClick={handleDownloadPdf}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-white text-oes-blue hover:bg-slate-100 rounded-xl transition-colors font-bold text-sm shadow-md"
+              className="flex-1 md:flex-none flex items-center justify-center gap-1.5 md:gap-2 px-4 md:px-5 py-2.5 md:py-3 bg-white text-oes-blue hover:bg-slate-50 rounded-xl transition-all font-bold text-xs md:text-sm shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:shadow-[0_6px_16px_rgba(0,0,0,0.15)] hover:-translate-y-0.5"
             >
               <Download className="w-4 h-4" /> Generate PDF
             </button>
@@ -237,10 +238,10 @@ export default function DeviceDashboard() {
         
         {/* MULTI-INVERTER TABS */}
         {isMulti && (
-          <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-100 flex gap-2 overflow-x-auto mx-2 md:mx-0">
+          <div className="bg-white p-1.5 md:p-2 rounded-xl shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] border border-slate-100 flex gap-2 overflow-x-auto mx-2 md:mx-0 hide-scrollbar">
             <button 
               onClick={() => setViewMode('combined')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${isCombined ? 'bg-oes-blue text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+              className={`px-4 py-2 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition-colors ${isCombined ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
             >
               Combined Plant
             </button>
@@ -248,7 +249,7 @@ export default function DeviceDashboard() {
               <button 
                 key={idx} 
                 onClick={() => setViewMode(idx.toString())}
-                className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${viewMode === idx.toString() ? 'bg-oes-blue text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                className={`px-4 py-2 rounded-lg text-xs md:text-sm font-bold whitespace-nowrap transition-colors ${viewMode === idx.toString() ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
               >
                 Inverter {idx + 1}
               </button>
@@ -257,63 +258,62 @@ export default function DeviceDashboard() {
         )}
 
         {/* HERO SOLAR GENERATION CARD (App Aesthetic) */}
-        <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-100 relative overflow-hidden mx-2 md:mx-0">
-          <div className="absolute top-0 right-0 w-32 h-32 md:w-48 md:h-48 bg-oes-green/10 rounded-bl-full -mr-10 -mt-10"></div>
+        <div className="bg-white rounded-3xl p-5 md:p-8 shadow-[0_8px_30px_-10px_rgba(0,0,0,0.05)] border border-slate-100 relative overflow-hidden mx-2 md:mx-0 group hover:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.08)] transition-shadow">
+          <div className="absolute top-0 right-0 w-32 h-32 md:w-48 md:h-48 bg-gradient-to-bl from-oes-green/10 to-transparent rounded-bl-full -mr-10 -mt-10 pointer-events-none"></div>
           
-          <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-5 md:gap-6">
             <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider ${statusColor}`}>
+              <div className="flex items-center gap-2 mb-3">
+                <span className={`px-2.5 py-1 rounded-md text-[9px] md:text-[10px] font-black uppercase tracking-wider ${statusColor}`}>
                   {statusLabel}
                 </span>
-                <span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider ${isOnline ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                <span className={`px-2.5 py-1 rounded-md text-[9px] md:text-[10px] font-black uppercase tracking-wider ${isOnline ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
                   {isOnline ? 'ONLINE' : 'OFFLINE'}
                 </span>
               </div>
               
-              <div className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-4">
+              <div className="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2 md:mt-4">
                 {isCombined ? 'Total Active Output' : `Current Output`}
               </div>
-              <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-6xl font-black text-slate-800 tracking-tighter">{powerKW}</span>
-                <span className="text-2xl font-bold text-slate-500">kW</span>
+              <div className="flex items-baseline gap-1.5 md:gap-2 mt-1">
+                <span className="text-5xl md:text-7xl font-black text-slate-800 tracking-tighter">{powerKW}</span>
+                <span className="text-xl md:text-2xl font-bold text-slate-400">kW</span>
               </div>
             </div>
 
-            <div className="text-right">
-              <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Performance Ratio</div>
-              <div className="text-xl font-bold text-slate-700 mt-1">
+            <div className="bg-slate-50/80 md:bg-transparent p-3 md:p-0 rounded-xl md:rounded-none md:text-right border border-slate-100 md:border-none">
+              <div className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest">Performance Ratio</div>
+              <div className="text-lg md:text-2xl font-black text-slate-700 mt-0.5 md:mt-1">
                 {((parseFloat(powerKW) / (device.capacity_kw || 50)) * 100).toFixed(1)}%
               </div>
-              <div className="text-xs text-slate-400 mt-1">Rated: {device.capacity_kw} kWp</div>
+              <div className="text-[10px] md:text-xs text-slate-400 mt-1 md:mt-2 font-medium">Rated: {device.capacity_kw} kWp</div>
             </div>
           </div>
         </div>
-
         {/* 4. CORE KPI METRICS (App Aesthetic) */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mx-2 md:mx-0">
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-            <div className="text-oes-green mb-3"><Zap className="w-6 h-6" /></div>
-            <div className="text-2xl md:text-3xl font-black text-slate-800">{e_day.toFixed(1)}</div>
-            <div className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Today (kWh)</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mx-2 md:mx-0">
+          <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-transform">
+            <div className="bg-gradient-to-br from-oes-green/20 to-oes-green/5 w-10 h-10 rounded-xl flex items-center justify-center text-oes-green mb-3"><Zap className="w-5 h-5" /></div>
+            <div className="text-xl md:text-3xl font-black text-slate-800">{e_day.toFixed(1)}</div>
+            <div className="text-[10px] md:text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Today (kWh)</div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-            <div className="text-oes-blue mb-3"><Activity className="w-6 h-6" /></div>
-            <div className="text-2xl md:text-3xl font-black text-slate-800">{(e_tot / 1000).toFixed(1)}</div>
-            <div className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Life (MWh)</div>
+          <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-transform">
+            <div className="bg-gradient-to-br from-oes-blue/20 to-oes-blue/5 w-10 h-10 rounded-xl flex items-center justify-center text-oes-blue mb-3"><Activity className="w-5 h-5" /></div>
+            <div className="text-xl md:text-3xl font-black text-slate-800">{(e_tot / 1000).toFixed(1)}</div>
+            <div className="text-[10px] md:text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Life (MWh)</div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-            <div className="text-red-400 mb-3"><Cpu className="w-6 h-6" /></div>
-            <div className="text-2xl md:text-3xl font-black text-slate-800">{(parseFloat(currentInv.temp) || 0).toFixed(1)}</div>
-            <div className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Temp (°C)</div>
+          <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-transform">
+            <div className="bg-gradient-to-br from-amber-500/20 to-amber-500/5 w-10 h-10 rounded-xl flex items-center justify-center text-amber-500 mb-3"><Cpu className="w-5 h-5" /></div>
+            <div className="text-xl md:text-3xl font-black text-slate-800">{(parseFloat(currentInv.temp) || 0).toFixed(1)}</div>
+            <div className="text-[10px] md:text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Temp (°C)</div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-            <div className="text-slate-400 mb-3"><ShieldAlert className="w-6 h-6" /></div>
-            <div className="text-2xl md:text-3xl font-black text-slate-800">{(parseFloat(currentInv.freq) || 0).toFixed(2)}</div>
-            <div className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Freq (Hz)</div>
+          <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-transform">
+            <div className="bg-gradient-to-br from-indigo-500/20 to-indigo-500/5 w-10 h-10 rounded-xl flex items-center justify-center text-indigo-500 mb-3"><ShieldAlert className="w-5 h-5" /></div>
+            <div className="text-xl md:text-3xl font-black text-slate-800">{(parseFloat(currentInv.freq) || 0).toFixed(2)}</div>
+            <div className="text-[10px] md:text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Freq (Hz)</div>
           </div>
         </div>
 
