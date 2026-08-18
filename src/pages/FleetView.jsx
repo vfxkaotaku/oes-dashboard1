@@ -44,7 +44,7 @@ export default function FleetView() {
     setLastSeenMap(initialSeen);
 
     // Connect to WebSocket MQTT Broker (EMQX - reliable WS support)
-    const client = mqtt.connect('ws://broker.emqx.io:8083/mqtt');
+    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
     
     client.on('connect', () => {
       console.log('FleetView: Connected to MQTT Broker (EMQX)');

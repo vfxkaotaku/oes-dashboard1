@@ -35,7 +35,7 @@ export default function DeviceDashboard() {
     setDevice(getDeviceBySerial(serial));
     setHistoricalData(getHistoricalAnalytics(serial, historyPeriod, device.capacity_kw || 50));
 
-    const client = mqtt.connect('ws://broker.emqx.io:8083/mqtt');
+    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
 
     client.on('connect', () => {
       console.log(`DeviceDashboard: Subscribing to telemetry for ${serial}`);

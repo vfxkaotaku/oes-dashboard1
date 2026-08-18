@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { Sun, Activity, ShieldCheck, Layers, HelpCircle } from 'lucide-react';
 import FleetView from './pages/FleetView';
 import DeviceDashboard from './pages/DeviceDashboard';
@@ -17,7 +17,7 @@ function App() {
             {/* Logo & Product Name */}
             <Link to="/" className="group">
               <div className="bg-white rounded-xl shadow-sm transition-transform group-hover:scale-105 flex items-center" style={{ padding: '6px 16px', height: '48px' }}>
-                <img src="/logo.png" alt="ONE EARTH Solar" style={{ height: '28px', width: 'auto', objectFit: 'contain' }} />
+                <img src={`${import.meta.env.BASE_URL}logo.png`} alt="ONE EARTH Solar" style={{ height: '28px', width: 'auto', objectFit: 'contain' }} />
                 
                 {/* Vertical Divider */}
                 <div className="bg-slate-200" style={{ width: '2px', height: '24px', margin: '0 12px', borderRadius: '1px' }}></div>
