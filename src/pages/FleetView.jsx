@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Activity, Plus, Search, Sun, Zap, BatteryCharging, Server, 
+  Activity, Plus, Search, Sun, Zap, BatteryCharging, Server, Cloud, 
   MapPin, Edit, Trash2, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, X
 } from 'lucide-react';
 import mqtt from 'mqtt';
@@ -22,13 +22,14 @@ export default function FleetView() {
   const [currentEditDev, setCurrentEditDev] = useState(null);
 
   // Form State for Add / Edit
+  const [capacityRaw, setCapacityRaw] = useState('80');
   const [formState, setFormState] = useState({
     serial_number: '',
     client_name: '',
     site_name: '',
     location: '',
-    inverter_model: 'Polycab 50 kW',
-    capacity_kw: 50
+    inverter_model: 'Huawei SUN2000 80 kW (2x 40kW)',
+    capacity_kw: 80
   });
 
   // Load devices on mount
@@ -165,7 +166,7 @@ export default function FleetView() {
       inverter_model: 'Polycab 50 kW',
       capacity_kw: 50
     });
-    setShowAddModal(true);
+    setCapacityRaw('80'); setShowAddModal(true);
   };
 
   const handleSaveNewDevice = () => {
@@ -293,8 +294,8 @@ export default function FleetView() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Connected
             </div>
           </div>
-          <div className="order-1 md:order-2 bg-gradient-to-br from-orange-100 to-orange-50 text-orange-600 p-2.5 md:p-3 rounded-xl self-start md:self-auto">
-            <Activity className="w-5 h-5 md:w-6 md:h-6 text-orange-600" />
+          <div className="order-1 md:order-2 bg-gradient-to-br from-sky-100 to-sky-50 text-sky-600 p-2.5 md:p-3 rounded-xl self-start md:self-auto">
+            <Cloud className="w-5 h-5 md:w-6 md:h-6 text-sky-600" />
           </div>
         </div>
       </div>
@@ -592,10 +593,27 @@ export default function FleetView() {
                 <div>
                   <label className="block text-slate-600 mb-1">Rated Capacity (kWp)</label>
                   <input 
-                    type="number" 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 outline-none focus:border-oes-blue"
-                    value={formState.capacity_kw}
-                    onChange={e => setFormState({ ...formState, capacity_kw: parseFloat(e.target.value) || 50 })}
+                    type="text" 
+                    inputMode="decimal"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 outline-none focus:border-oes-blue focus:ring-2 focus:ring-oes-blue/20 transition-all"
+                    value={capacityRaw}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        setCapacityRaw(val);
+                        const num = parseFloat(val);
+                        setFormState({ ...formState, capacity_kw: !isNaN(num) && num > 0 ? num : 80 });
+                      }
+                    }}
+                    onBlur={() => {
+                      const num = parseFloat(capacityRaw);
+                      if (!isNaN(num) && num > 0) {
+                        setCapacityRaw(num.toFixed(2));
+                      } else {
+                        setCapacityRaw('80.00');
+                      }
+                    }}
+                    placeholder="e.g. 80.00"
                   />
                 </div>
               </div>
@@ -687,10 +705,27 @@ export default function FleetView() {
                 <div>
                   <label className="block text-slate-600 mb-1">Rated Capacity (kWp)</label>
                   <input 
-                    type="number" 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 outline-none focus:border-oes-blue"
-                    value={formState.capacity_kw}
-                    onChange={e => setFormState({ ...formState, capacity_kw: parseFloat(e.target.value) || 50 })}
+                    type="text" 
+                    inputMode="decimal"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 outline-none focus:border-oes-blue focus:ring-2 focus:ring-oes-blue/20 transition-all"
+                    value={capacityRaw}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        setCapacityRaw(val);
+                        const num = parseFloat(val);
+                        setFormState({ ...formState, capacity_kw: !isNaN(num) && num > 0 ? num : 80 });
+                      }
+                    }}
+                    onBlur={() => {
+                      const num = parseFloat(capacityRaw);
+                      if (!isNaN(num) && num > 0) {
+                        setCapacityRaw(num.toFixed(2));
+                      } else {
+                        setCapacityRaw('80.00');
+                      }
+                    }}
+                    placeholder="e.g. 80.00"
                   />
                 </div>
               </div>
