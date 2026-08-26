@@ -22,6 +22,7 @@ export default function FleetView() {
   const [currentEditDev, setCurrentEditDev] = useState(null);
 
   // Form State for Add / Edit
+  const [capacityRaw, setCapacityRaw] = useState('80');
   const [formState, setFormState] = useState({
     serial_number: '',
     client_name: '',
@@ -165,7 +166,7 @@ export default function FleetView() {
       inverter_model: 'Polycab 50 kW',
       capacity_kw: 50
     });
-    setShowAddModal(true);
+    setCapacityRaw('80'); setFormState(prev => ({ ...prev, capacity_kw: 80 })); setShowAddModal(true);
   };
 
   const handleSaveNewDevice = () => {
@@ -466,7 +467,10 @@ export default function FleetView() {
                     </td>
 
                     <td className="p-4">
-                      <span className="font-mono font-bold text-slate-800 text-sm bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">{dev.serial_number}</span>
+                      <span
+                        className="font-mono font-bold text-slate-800 text-xs bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100 block max-w-[140px] truncate"
+                        title={dev.serial_number}
+                      >{dev.serial_number}</span>
                     </td>
 
                     <td className="p-4">
@@ -484,12 +488,12 @@ export default function FleetView() {
                     </td>
 
                     <td className="p-4 text-right">
-                      <div className="font-black text-slate-800 text-base">{liveKw}</div>
+                      <div className={`font-black text-base ${liveKw !== '--' ? 'text-emerald-600' : 'text-slate-400'}`}>{liveKw}</div>
                       <div className="text-[10px] font-semibold text-slate-400 uppercase mt-0.5">kW</div>
                     </td>
 
                     <td className="p-4 text-right">
-                      <div className="font-black text-oes-blue text-base">{todayKwh}</div>
+                      <div className={`font-black text-base ${todayKwh !== '--' ? 'text-oes-blue' : 'text-slate-400'}`}>{todayKwh}</div>
                       <div className="text-[10px] font-semibold text-slate-400 uppercase mt-0.5">kWh</div>
                     </td>
 
@@ -498,17 +502,17 @@ export default function FleetView() {
                     </td>
 
                     <td className="p-4 pr-6 text-center">
-                      <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={(e) => handleOpenEditModal(dev, e)} className="p-2 hover:bg-white hover:shadow-sm hover:text-blue-600 text-slate-400 rounded-xl transition-all border border-transparent hover:border-slate-200" title="Edit Device">
+                      <div className="flex items-center justify-center gap-1">
+                        <button onClick={(e) => handleOpenEditModal(dev, e)} className="p-2 hover:bg-blue-50 hover:text-blue-600 text-slate-400 rounded-lg transition-all" title="Edit Device">
                           <Edit className="w-4 h-4" />
                         </button>
-                        <button onClick={(e) => handleDeleteDevice(dev.serial_number, e)} className="p-2 hover:bg-white hover:shadow-sm hover:text-rose-600 text-slate-400 rounded-xl transition-all border border-transparent hover:border-slate-200" title="Remove Device">
+                        <button onClick={(e) => handleDeleteDevice(dev.serial_number, e)} className="p-2 hover:bg-rose-50 hover:text-rose-600 text-slate-400 rounded-lg transition-all" title="Remove Device">
                           <Trash2 className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => navigate(`/device/${dev.serial_number}`)}
-                          title="Open Live Dashboard"
-                          className="p-1.5 text-oes-blue hover:bg-oes-blue/10 rounded-lg transition-colors"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/device/${dev.serial_number}`); }}
+                          title="Open Dashboard"
+                          className="p-2 text-oes-blue hover:bg-oes-blue/10 rounded-lg transition-colors"
                         >
                           <ArrowUpRight className="w-4 h-4" />
                         </button>
@@ -594,8 +598,23 @@ export default function FleetView() {
                   <input 
                     type="number" 
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 outline-none focus:border-oes-blue"
-                    value={formState.capacity_kw}
-                    onChange={e => setFormState({ ...formState, capacity_kw: parseFloat(e.target.value) || 50 })}
+                    type="text"
+                    inputMode="decimal"
+                    value={capacityRaw}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        setCapacityRaw(val);
+                        const num = parseFloat(val);
+                        if (!isNaN(num) && num > 0) setFormState(prev => ({ ...prev, capacity_kw: num }));
+                      }
+                    }}
+                    onBlur={() => {
+                      const num = parseFloat(capacityRaw);
+                      setCapacityRaw(!isNaN(num) && num > 0 ? String(num) : '80');
+                      setFormState(prev => ({ ...prev, capacity_kw: (!isNaN(num) && num > 0) ? num : 80 }));
+                    }}
+                    placeholder="e.g. 80" 
                   />
                 </div>
               </div>
@@ -689,8 +708,23 @@ export default function FleetView() {
                   <input 
                     type="number" 
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 outline-none focus:border-oes-blue"
-                    value={formState.capacity_kw}
-                    onChange={e => setFormState({ ...formState, capacity_kw: parseFloat(e.target.value) || 50 })}
+                    type="text"
+                    inputMode="decimal"
+                    value={capacityRaw}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        setCapacityRaw(val);
+                        const num = parseFloat(val);
+                        if (!isNaN(num) && num > 0) setFormState(prev => ({ ...prev, capacity_kw: num }));
+                      }
+                    }}
+                    onBlur={() => {
+                      const num = parseFloat(capacityRaw);
+                      setCapacityRaw(!isNaN(num) && num > 0 ? String(num) : '80');
+                      setFormState(prev => ({ ...prev, capacity_kw: (!isNaN(num) && num > 0) ? num : 80 }));
+                    }}
+                    placeholder="e.g. 80" 
                   />
                 </div>
               </div>
