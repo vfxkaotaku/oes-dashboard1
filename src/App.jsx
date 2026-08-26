@@ -1,11 +1,22 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { HashRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { Sun, Activity, ShieldCheck, Layers, HelpCircle } from 'lucide-react';
+import { Sun, Activity, ShieldCheck, Layers, HelpCircle, Settings, X } from 'lucide-react';
 import FleetView from './pages/FleetView';
 import DeviceDashboard from './pages/DeviceDashboard';
 import './index.css';
 
 function App() {
+  const [showSettings, setShowSettings] = useState(false);
+  const [mqttHost, setMqttHost] = useState(localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt');
+  const [mqttPrefix, setMqttPrefix] = useState(localStorage.getItem('oes_mqtt_prefix') || 'oes');
+
+  const handleSaveSettings = () => {
+    localStorage.setItem('oes_mqtt_host', mqttHost);
+    localStorage.setItem('oes_mqtt_prefix', mqttPrefix);
+    setShowSettings(false);
+    window.location.reload(); // Reload to reconnect MQTT
+  };
+
   return (
     <Router>
       <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans">
@@ -42,9 +53,68 @@ function App() {
               >
                 Fleet Overview
               </Link>
+              
+              <button 
+                onClick={() => setShowSettings(true)}
+                className="p-2 bg-white/10 rounded-xl hover:bg-white/20 transition-colors"
+                title="Global Settings"
+              >
+                <Settings size={18} />
+              </button>
             </div>
           </div>
         </header>
+
+        {/* Global Settings Modal */}
+        {showSettings && (
+          <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-fade-in-up">
+              <div className="flex justify-between items-center p-5 border-b border-slate-100">
+                <div className="font-bold text-lg text-slate-800">Dashboard Settings</div>
+                <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">MQTT Broker URL (WebSocket)</label>
+                  <input 
+                    type="text" 
+                    value={mqttHost}
+                    onChange={(e) => setMqttHost(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-oes-blue/20 focus:border-oes-blue transition-all"
+                    placeholder="wss://broker.emqx.io:8084/mqtt"
+                  />
+                  <p className="text-[10px] text-slate-400">Must be a WebSocket (wss://) URL if running in browser.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">MQTT Topic Prefix</label>
+                  <input 
+                    type="text" 
+                    value={mqttPrefix}
+                    onChange={(e) => setMqttPrefix(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-oes-blue/20 focus:border-oes-blue transition-all"
+                    placeholder="oes"
+                  />
+                </div>
+              </div>
+              <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+                <button 
+                  onClick={() => setShowSettings(false)}
+                  className="px-5 py-2.5 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSaveSettings}
+                  className="px-5 py-2.5 text-sm font-bold text-white bg-oes-blue rounded-xl hover:bg-[#00284A] transition-colors shadow-sm"
+                >
+                  Save & Reload
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* MAIN CONTENT AREA */}
         <main className="max-w-6xl w-full mx-auto px-4 md:px-6 py-6 flex-1">

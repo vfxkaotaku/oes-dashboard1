@@ -5,7 +5,7 @@ import {
   MapPin, Edit, Trash2, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, X
 } from 'lucide-react';
 import mqtt from 'mqtt';
-import { getDevices, saveDevices, upsertDevice, deleteDevice, recordDeviceTelemetry } from '../utils/storage';
+import { getDevices, saveDevices, upsertDevice, deleteDevice, recordDeviceTelemetry, saveLastLiveData } from '../utils/storage';
 
 export default function FleetView() {
   const navigate = useNavigate();
@@ -43,12 +43,15 @@ export default function FleetView() {
     });
     setLastSeenMap(initialSeen);
 
-    // Connect to WebSocket MQTT Broker (EMQX - reliable WS support)
-    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+    // Connect to WebSocket MQTT Broker
+    const mqttHost = localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt';
+    const mqttPrefix = localStorage.getItem('oes_mqtt_prefix') || 'oes';
+    
+    const client = mqtt.connect(mqttHost);
     
     client.on('connect', () => {
-      console.log('FleetView: Connected to MQTT Broker (EMQX)');
-      client.subscribe('oes/#');
+      console.log(`FleetView: Connected to MQTT Broker (${mqttHost})`);
+      client.subscribe(`${mqttPrefix}/#`);
     });
 
     client.on('message', (topic, message) => {
@@ -58,13 +61,19 @@ export default function FleetView() {
       });
       try {
         const parts = topic.split('/');
+        // Supported topic formats:
+        //  oes/logger/DEVICE_ID/telemetry   (legacy simulator)
+        //  oes/DEVICE_ID/live               (legacy ESP32)
+        //  PREFIX/DEVICE_ID/telemetry       (standard)
         let serial = '';
         let type = '';
 
-        if (parts[0] === 'oes' && parts[1] === 'logger') {
+        if (parts[0] === 'oes' && parts[1] === 'logger' && parts.length >= 4) {
+          // Legacy: oes/logger/DEVICE_ID/type
           serial = parts[2];
           type = parts[3];
-        } else if (parts[0] === 'oes') {
+        } else if (parts.length >= 3) {
+          // Standard: PREFIX/DEVICE_ID/type
           serial = parts[1];
           type = parts[2];
         }
@@ -88,15 +97,16 @@ export default function FleetView() {
         if (type === 'telemetry' || type === 'live') {
           setLiveData(prev => ({ ...prev, [serial]: data }));
           recordDeviceTelemetry(serial, data);
+            saveLastLiveData(serial, data); // Cache for instant DeviceDashboard load
 
           // Auto-register discovered logger if not present
           setDevices(prev => {
             if (!prev.find(d => d.serial_number === serial)) {
               const newDev = {
                 serial_number: serial,
-                client_name: data.plant || `Client ${serial}`,
+                client_name: data.device_name || data.plant || `Logger ${serial}`,
                 site_name: 'Solar Site',
-                location: 'Maharashtra, India',
+                location: 'Unknown Location',
                 inverter_model: data.inv ? `Multi-Inverter (${data.inv.length})` : 'Solar Inverter',
                 capacity_kw: 50,
                 status: 'online',
@@ -106,7 +116,7 @@ export default function FleetView() {
               saveDevices(updated);
               return updated;
             }
-            return prev.map(d => d.serial_number === serial ? { ...d, status: 'online', last_seen: new Date().toISOString() } : d);
+            return prev.map(d => d.serial_number === serial ? { ...d, client_name: data.device_name || d.client_name, status: 'online', last_seen: new Date().toISOString() } : d);
           });
 
         } else if (type === 'status') {
@@ -128,12 +138,12 @@ export default function FleetView() {
       }
     });
 
-    // Heartbeat check interval: Mark devices offline if no message received in 45s
+    // Heartbeat check interval: Mark devices offline if no message received in 60s
     const statusInterval = setInterval(() => {
       const currentTime = Date.now();
       setDevices(prev => prev.map(d => {
         const last = lastSeenMap[d.serial_number] || (d.last_seen ? new Date(d.last_seen).getTime() : 0);
-        if (d.status === 'online' && currentTime - last > 45000) {
+        if (d.status === 'online' && currentTime - last > 60000) {
           return { ...d, status: 'offline' };
         }
         return d;
@@ -330,7 +340,7 @@ export default function FleetView() {
           onClick={handleOpenAddModal}
           className="bg-oes-blue hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-oes-blue/20 transition-all active:scale-95 w-full md:w-auto"
         >
-          <Plus className="w-4 h-4 text-oes-green" /> Add Logger
+          <Plus className="w-4 h-4 text-oes-green-dark" /> Add Logger
         </button>
       </div>
 

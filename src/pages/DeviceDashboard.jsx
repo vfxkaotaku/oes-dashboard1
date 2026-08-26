@@ -9,7 +9,7 @@ import mqtt from 'mqtt';
 import { 
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell 
 } from 'recharts';
-import { getDeviceBySerial, upsertDevice, recordDeviceTelemetry, getHistoricalAnalytics } from '../utils/storage';
+import { getDeviceBySerial, upsertDevice, recordDeviceTelemetry, getHistoricalAnalytics, getLastLiveData, saveLastLiveData } from '../utils/storage';
 import { generateSolarPdfReport } from '../utils/pdfGenerator';
 
 export default function DeviceDashboard() {
@@ -17,7 +17,7 @@ export default function DeviceDashboard() {
   const navigate = useNavigate();
 
   const [device, setDevice] = useState(() => getDeviceBySerial(serial));
-  const [liveData, setLiveData] = useState(null);
+  const [liveData, setLiveData] = useState(() => getLastLiveData(serial)); // Pre-load cached data instantly
   const [lastSeen, setLastSeen] = useState(Date.now());
   const [isOnline, setIsOnline] = useState(true);
   const [viewMode, setViewMode] = useState('combined'); // 'combined' | '0' | '1' ...
@@ -32,19 +32,29 @@ export default function DeviceDashboard() {
 
   // 1. MQTT Connection & Live Streaming
   useEffect(() => {
-    setDevice(getDeviceBySerial(serial));
-    setHistoricalData(getHistoricalAnalytics(serial, historyPeriod, device.capacity_kw || 50));
+    const dev = getDeviceBySerial(serial);
+    setDevice(dev);
+    
+    // Attempt instant pre-load from cache
+    const cached = getLastLiveData(serial);
+    if (cached) {
+      setLiveData(cached);
+      setIsOnline(true);
+    }
+    
+    setHistoricalData(getHistoricalAnalytics(serial, historyPeriod, dev?.capacity_kw || 50));
 
-    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+    const mqttHost = localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt';
+    const mqttPrefix = localStorage.getItem('oes_mqtt_prefix') || 'oes';
+
+    console.log('DeviceDashboard: Connecting to MQTT ' + mqttHost + ' for device ' + serial);
+    const client = mqtt.connect(mqttHost);
 
     client.on('connect', () => {
-      console.log(`DeviceDashboard: Subscribing to telemetry for ${serial}`);
-      client.subscribe(`oes/logger/${serial}/telemetry`);
-      client.subscribe(`oes/logger/${serial}/status`);
-      client.subscribe(`oes/logger/${serial}/heartbeat`);
-      // Legacy topics
-      client.subscribe(`oes/${serial}/live`);
-      client.subscribe(`oes/${serial}/status`);
+      console.log('DeviceDashboard: Connected to MQTT for ' + serial);
+      // Wildcard subscriptions to guarantee we catch any topic format
+      client.subscribe(mqttPrefix + '/#');
+      client.subscribe('oes/#');
     });
 
     client.on('message', (topic, message) => {
@@ -53,37 +63,45 @@ export default function DeviceDashboard() {
         let msgSerial = '';
         let type = '';
 
-        if (parts[0] === 'oes' && parts[1] === 'logger') {
+        if (parts[0] === 'oes' && parts[1] === 'logger' && parts.length >= 4) {
           msgSerial = parts[2];
           type = parts[3];
-        } else if (parts[0] === 'oes') {
+        } else if (parts.length >= 3) {
           msgSerial = parts[1];
           type = parts[2];
+        } else if (parts.length === 2) {
+          msgSerial = parts[1];
+          type = 'telemetry';
         }
 
-        if (msgSerial !== serial) return;
+        // Case-insensitive match on serial
+        if (!msgSerial || msgSerial.toLowerCase() !== serial.toLowerCase()) return;
+
         const data = JSON.parse(message.toString());
         const now = Date.now();
-
         setLastSeen(now);
         setIsOnline(true);
 
-        if (type === 'telemetry' || type === 'live') {
+        if (type === 'telemetry' || type === 'live' || !type || data.ac_w !== undefined || data.inv !== undefined) {
           setLiveData(data);
+          saveLastLiveData(serial, data);
           recordDeviceTelemetry(serial, data);
         } else if (type === 'status') {
-          setIsOnline(data.online === true || data.online === 1);
+          setIsOnline(data.online === true || data.online === 1 || data.online === 'true');
         }
       } catch (e) {
-        // Ignore parse error
+        console.error('DeviceDashboard MQTT parse error:', e);
       }
     });
 
-    // Offline timer: if no packet for 40 seconds, mark offline
+    // Heartbeat check
     const timer = setInterval(() => {
-      if (Date.now() - lastSeen > 40000) {
-        setIsOnline(false);
-      }
+      setLastSeen(prev => {
+        if (Date.now() - prev > 45000) {
+          setIsOnline(false);
+        }
+        return prev;
+      });
     }, 5000);
 
     return () => {
@@ -113,7 +131,7 @@ export default function DeviceDashboard() {
   };
 
   // Safe fallback if liveData is null initially
-  const displayData = liveData || {
+  const displayData = liveData || getLastLiveData(serial) || {
     status: 0,
     pv_v: 0,
     pv_a: 0,
@@ -187,8 +205,9 @@ export default function DeviceDashboard() {
   const PIE_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6', '#F43F5E', '#6366F1'];
 
   // Status computation
-  const statusLabel = currentInv.status === 2 ? 'Generating' : currentInv.status === 3 ? 'Fault' : 'Standby';
-  const statusColor = currentInv.status === 2 ? 'bg-oes-green text-white' : currentInv.status === 3 ? 'bg-red-500 text-white' : 'bg-oes-blue text-white';
+  const isGenerating = parseFloat(ac_w) > 0 || currentInv?.status === 2 || currentInv?.status === '2' || currentInv?.status === 'online';
+  const statusLabel = isGenerating ? 'Generating' : (currentInv?.status === 3 ? 'Fault' : (isOnline ? 'Standby' : 'Offline'));
+  const statusColor = isGenerating ? 'bg-oes-green text-oes-blue' : (currentInv?.status === 3 ? 'bg-red-500 text-white' : 'bg-slate-700 text-white');
 
   const timeDiffSec = Math.floor((Date.now() - lastSeen) / 1000);
   const heartbeatText = isOnline 
@@ -293,7 +312,7 @@ export default function DeviceDashboard() {
         {/* 4. CORE KPI METRICS (App Aesthetic) */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mx-2 md:mx-0">
           <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-transform">
-            <div className="bg-gradient-to-br from-oes-green/20 to-oes-green/5 w-10 h-10 rounded-xl flex items-center justify-center text-oes-green mb-3"><Zap className="w-5 h-5" /></div>
+            <div className="bg-gradient-to-br from-oes-green/20 to-oes-green/5 w-10 h-10 rounded-xl flex items-center justify-center text-oes-green-dark mb-3"><Zap className="w-5 h-5" /></div>
             <div className="text-xl md:text-3xl font-black text-slate-800">{e_day.toFixed(1)}</div>
             <div className="text-[10px] md:text-xs font-bold text-slate-400 mt-1 uppercase tracking-wider">Today (kWh)</div>
           </div>
@@ -517,7 +536,7 @@ export default function DeviceDashboard() {
                     type="text" 
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 outline-none focus:border-oes-blue focus:ring-2 focus:ring-oes-blue/20 transition-all"
                     value={editForm.location}
-                    onChange={e => setFormState({ ...editForm, location: e.target.value })}
+                    onChange={e => setEditForm({ ...editForm, location: e.target.value })}
                   />
                 </div>
                 <div>
