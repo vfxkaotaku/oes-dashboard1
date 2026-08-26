@@ -130,20 +130,19 @@ export default function DeviceDashboard() {
     });
   };
 
-  // Safe fallback if liveData is null initially
-  const displayData = liveData || getLastLiveData(serial) || {
-    status: 0,
-    pv_v: 0,
-    pv_a: 0,
-    pv_w: 0,
-    ac_v: 0,
-    ac_a: 0,
-    ac_w: 0,
-    freq: 0,
-    e_day: 0,
-    e_tot: 0,
-    temp: 0
+  // Zero-out when device is offline - never show stale cached values
+  const ZERO_DATA = {
+    status: 0, pv_v: 0, pv_a: 0, pv_w: 0,
+    ac_v: 0, ac_a: 0, ac_w: 0, freq: 0,
+    e_day: 0, e_tot: 0, temp: 0
   };
+  const rawData = liveData || getLastLiveData(serial) || ZERO_DATA;
+  const displayData = isOnline ? rawData : (() => {
+    if (rawData.inv && Array.isArray(rawData.inv)) {
+      return { ...rawData, inv: rawData.inv.map(inv => ({ ...inv, ...ZERO_DATA, status: 0, online: 0 })) };
+    }
+    return { ...rawData, ...ZERO_DATA };
+  })();
 
   const isMulti = Array.isArray(displayData) || (displayData.inv && Array.isArray(displayData.inv));
   const inverters = Array.isArray(displayData) ? displayData : (displayData.inv ? displayData.inv : [displayData]);
