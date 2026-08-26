@@ -116,7 +116,7 @@ export default function DeviceDashboard() {
   }, [historyPeriod, serial, device.capacity_kw]);
 
   const handleSaveSiteDetails = () => {
-    const updated = upsertDevice(editForm);
+    const updated = upsertDevice({ ...editForm, _userEdit: true });
     setDevice(getDeviceBySerial(serial));
     setShowEditModal(false);
   };

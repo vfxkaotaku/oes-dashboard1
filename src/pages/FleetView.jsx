@@ -5,7 +5,7 @@ import {
   MapPin, Edit, Trash2, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, X
 } from 'lucide-react';
 import mqtt from 'mqtt';
-import { getDevices, saveDevices, upsertDevice, deleteDevice, recordDeviceTelemetry, saveLastLiveData } from '../utils/storage';
+import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, recordDeviceTelemetry, saveLastLiveData } from '../utils/storage';
 
 export default function FleetView() {
   const navigate = useNavigate();
@@ -101,8 +101,7 @@ export default function FleetView() {
 
           // Auto-register discovered logger if not present (skip if user deleted it)
           setDevices(prev => {
-            const blacklist = JSON.parse(localStorage.getItem('oes_deleted_serials') || '[]');
-            if (!prev.find(d => d.serial_number === serial) && !blacklist.includes(serial)) {
+            if (!prev.find(d => d.serial_number === serial) && !isDeviceBlacklisted(serial)) {
               const newDev = {
                 serial_number: serial,
                 client_name: data.device_name || data.plant || `Logger ${serial}`,
@@ -178,7 +177,7 @@ export default function FleetView() {
       alert('A logger with this Device ID already exists.');
       return;
     }
-    const updated = upsertDevice(formState);
+    const updated = upsertDevice({ ...formState, _userEdit: true });
     setDevices(updated);
     setShowAddModal(false);
   };
@@ -199,7 +198,7 @@ export default function FleetView() {
 
   const handleSaveEditDevice = () => {
     if (!formState.client_name) return;
-    const updated = upsertDevice(formState);
+    const updated = upsertDevice({ ...formState, _userEdit: true });
     setDevices(updated);
     setShowEditModal(false);
   };
@@ -208,12 +207,6 @@ export default function FleetView() {
     e.stopPropagation();
     if (confirm(`Are you sure you want to remove Data Logger ${serial}?`)) {
       const updated = deleteDevice(serial);
-      // Add to blacklist so MQTT auto-registration won't re-add it
-      try {
-        const bl = JSON.parse(localStorage.getItem('oes_deleted_serials') || '[]');
-        if (!bl.includes(serial)) bl.push(serial);
-        localStorage.setItem('oes_deleted_serials', JSON.stringify(bl));
-      } catch(e) {}
       setDevices(updated);
     }
   };

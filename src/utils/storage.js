@@ -35,11 +35,25 @@ export function upsertDevice(deviceData) {
 
   const idx = devices.findIndex(d => d.serial_number === serial);
   if (idx >= 0) {
-    devices[idx] = {
-      ...devices[idx],
-      ...deviceData,
-      last_seen: deviceData.last_seen || new Date().toISOString()
-    };
+    // Only update user-editable fields when explicitly passed (i.e. from Edit Site form)
+    // Never overwrite user edits with MQTT payload fields
+    const isUserEdit = deviceData._userEdit === true;
+    if (isUserEdit) {
+      // Full update from user edit form
+      devices[idx] = {
+        ...devices[idx],
+        ...deviceData,
+        last_seen: new Date().toISOString()
+      };
+      delete devices[idx]._userEdit;
+    } else {
+      // MQTT / auto update: only touch status and last_seen
+      devices[idx] = {
+        ...devices[idx],
+        status: deviceData.status || devices[idx].status || 'online',
+        last_seen: deviceData.last_seen || new Date().toISOString()
+      };
+    }
   } else {
     devices.unshift({
       serial_number: serial,
@@ -60,7 +74,20 @@ export function upsertDevice(deviceData) {
 export function deleteDevice(serial) {
   const devices = getDevices().filter(d => d.serial_number !== serial);
   saveDevices(devices);
+  // Blacklist: prevent MQTT from auto-re-registering this device
+  try {
+    const bl = JSON.parse(localStorage.getItem('oes_deleted_serials') || '[]');
+    if (!bl.includes(serial)) bl.push(serial);
+    localStorage.setItem('oes_deleted_serials', JSON.stringify(bl));
+  } catch(e) {}
   return devices;
+}
+
+export function isDeviceBlacklisted(serial) {
+  try {
+    const bl = JSON.parse(localStorage.getItem('oes_deleted_serials') || '[]');
+    return bl.includes(serial);
+  } catch(e) { return false; }
 }
 
 export function getDeviceBySerial(serial) {
