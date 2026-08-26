@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import mqtt from 'mqtt';
 import { 
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell 
+  ResponsiveContainer, Tooltip, PieChart, Pie, Cell 
 } from 'recharts';
 import { getDeviceBySerial, upsertDevice, recordDeviceTelemetry, getHistoricalAnalytics, getLastLiveData, saveLastLiveData } from '../utils/storage';
 import { generateSolarPdfReport } from '../utils/pdfGenerator';
@@ -419,79 +419,6 @@ export default function DeviceDashboard() {
             </div>
           </div>
         )}
-
-        {/* 7. HISTORICAL DATA ANALYTICS (App Aesthetic + Features) */}
-        <div className="bg-white rounded-2xl p-6 md:p-8 border border-slate-100 shadow-sm mx-2 md:mx-0">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-oes-blue" /> Output Trend
-              </h3>
-              <p className="text-sm text-slate-500 mt-1 font-medium">Historical power output and energy statistics</p>
-            </div>
-
-            <div className="flex bg-slate-50 p-1 rounded-xl text-sm font-bold border border-slate-100 overflow-x-auto w-full sm:w-auto">
-              <button 
-                onClick={() => setHistoryPeriod('today')}
-                className={`flex-1 px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${historyPeriod === 'today' ? 'bg-white text-oes-blue shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                Today
-              </button>
-              <button 
-                onClick={() => setHistoryPeriod('yesterday')}
-                className={`flex-1 px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${historyPeriod === 'yesterday' ? 'bg-white text-oes-blue shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                Yesterday
-              </button>
-              <button 
-                onClick={() => setHistoryPeriod('7days')}
-                className={`flex-1 px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${historyPeriod === '7days' ? 'bg-white text-oes-blue shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                7 Days
-              </button>
-              <button 
-                onClick={() => setHistoryPeriod('30days')}
-                className={`flex-1 px-4 py-2 rounded-lg transition-colors whitespace-nowrap ${historyPeriod === '30days' ? 'bg-white text-oes-blue shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                30 Days
-              </button>
-            </div>
-          </div>
-
-          {/* Chart View */}
-          <div className="w-full" style={{ height: 350 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              {historyPeriod === '7days' || historyPeriod === '30days' ? (
-                <BarChart data={historicalData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="time" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} dy={10} />
-                  <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} dx={-10} unit=" kWh" />
-                  <Tooltip 
-                    cursor={{ fill: '#f8fafc' }}
-                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                    formatter={(val) => [`${val} kWh`, 'Energy']} 
-                  />
-                  <Bar dataKey="energy" fill="#3B82F6" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              ) : (
-                <AreaChart data={historicalData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorPower" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="time" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} dy={10} />
-                  <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} dx={-10} unit=" kW" />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                    formatter={(val) => [`${val} kW`, 'Power Output']} 
-                  />
-                  <Area type="monotone" dataKey="power" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#colorPower)" isAnimationActive={false} />
-                </AreaChart>
-              )}
-            </ResponsiveContainer>
-          </div>
-        </div>
 
       </div>
 
