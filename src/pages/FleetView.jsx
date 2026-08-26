@@ -99,9 +99,10 @@ export default function FleetView() {
           recordDeviceTelemetry(serial, data);
             saveLastLiveData(serial, data); // Cache for instant DeviceDashboard load
 
-          // Auto-register discovered logger if not present
+          // Auto-register discovered logger if not present (skip if user deleted it)
           setDevices(prev => {
-            if (!prev.find(d => d.serial_number === serial)) {
+            const blacklist = JSON.parse(localStorage.getItem('oes_deleted_serials') || '[]');
+            if (!prev.find(d => d.serial_number === serial) && !blacklist.includes(serial)) {
               const newDev = {
                 serial_number: serial,
                 client_name: data.device_name || data.plant || `Logger ${serial}`,
@@ -116,7 +117,7 @@ export default function FleetView() {
               saveDevices(updated);
               return updated;
             }
-            return prev.map(d => d.serial_number === serial ? { ...d, client_name: data.device_name || d.client_name, status: 'online', last_seen: new Date().toISOString() } : d);
+            return prev.map(d => d.serial_number === serial ? { ...d, status: 'online', last_seen: new Date().toISOString() } : d);
           });
 
         } else if (type === 'status') {
@@ -207,6 +208,12 @@ export default function FleetView() {
     e.stopPropagation();
     if (confirm(`Are you sure you want to remove Data Logger ${serial}?`)) {
       const updated = deleteDevice(serial);
+      // Add to blacklist so MQTT auto-registration won't re-add it
+      try {
+        const bl = JSON.parse(localStorage.getItem('oes_deleted_serials') || '[]');
+        if (!bl.includes(serial)) bl.push(serial);
+        localStorage.setItem('oes_deleted_serials', JSON.stringify(bl));
+      } catch(e) {}
       setDevices(updated);
     }
   };
