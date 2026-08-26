@@ -353,7 +353,7 @@ export default function DeviceDashboard() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-500 font-medium">Total Power</span>
-                <span className="font-bold text-amber-500 text-lg">{(pv_w || 0).toFixed(0)} W</span>
+                <span className="font-bold text-amber-500 text-lg">{((pv_w || 0) / 1000).toFixed(2)} kW</span>
               </div>
             </div>
           </div>
@@ -396,7 +396,7 @@ export default function DeviceDashboard() {
                         <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(val) => `${val.toFixed(0)} W`} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                    <Tooltip formatter={(val) => `${(val / 1000).toFixed(2)} kW`} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -409,7 +409,7 @@ export default function DeviceDashboard() {
                       <span className="font-bold text-slate-700">{str.name}</span>
                     </div>
                     <div className="text-right">
-                      <div className="font-black text-slate-800 text-lg">{str.value.toFixed(0)} W</div>
+                      <div className="font-black text-slate-800 text-lg">{(str.value / 1000).toFixed(2)} kW</div>
                       <div className="text-xs font-medium text-slate-500">{str.voltage?.toFixed(1)}V • {str.current?.toFixed(2)}A</div>
                     </div>
                   </div>
