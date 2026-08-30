@@ -122,9 +122,17 @@ export default function DeviceDashboard() {
   };
 
   const handleDownloadPdf = () => {
+    // Use freshest data: current live state or last cached payload
+    const pdfData = liveData || getLastLiveData(serial);
+    if (pdfData && pdfData.inv) {
+      pdfData.inv.forEach((inv, i) => {
+        const strKeys = Object.keys(inv).filter(k => k.startsWith('str') && k.endsWith('_v'));
+        console.log('[PDF] Inv', inv.addr || i+1, '=> strings:', strKeys.join(', '));
+      });
+    }
     generateSolarPdfReport({
       device,
-      liveData,
+      liveData: pdfData,
       historicalData,
       selectedPeriod: historyPeriod
     });
