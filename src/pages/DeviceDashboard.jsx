@@ -27,29 +27,36 @@ import { generateSolarPdfReport } from '../utils/pdfGenerator';
 function CustomHistoryTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
+    const hasData = (data.energy > 0) || (data.power > 0) || (data.samplesCount > 0);
     return (
       <div className="bg-slate-900 text-white px-3.5 py-2.5 rounded-xl shadow-xl text-xs space-y-1 border border-slate-700/50">
         <div className="font-bold text-slate-200 border-b border-slate-700/60 pb-1 flex items-center justify-between gap-4">
           <span>{label} {data.day ? `(${data.day})` : ''}</span>
           {data.isToday && <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-bold">Live</span>}
         </div>
-        {data.energy !== null && data.energy !== undefined && (
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-slate-400">Yield:</span>
-            <span className="font-bold text-emerald-400">{data.energy} kWh</span>
-          </div>
-        )}
-        {data.power !== null && data.power !== undefined && (
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-slate-400">Power:</span>
-            <span className="font-bold text-blue-400">{data.power} kW</span>
-          </div>
-        )}
-        {data.specificYield && (
-          <div className="flex items-center justify-between gap-4">
-            <span className="text-slate-400">Specific Yield:</span>
-            <span className="font-medium text-amber-300">{data.specificYield} kWh/kWp</span>
-          </div>
+        {!hasData ? (
+          <div className="text-slate-400 italic py-0.5">No readings recorded</div>
+        ) : (
+          <>
+            {data.energy !== null && data.energy !== undefined && (
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-400">Yield:</span>
+                <span className="font-bold text-emerald-400">{data.energy} kWh</span>
+              </div>
+            )}
+            {data.power !== null && data.power !== undefined && (
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-400">Power:</span>
+                <span className="font-bold text-blue-400">{data.power} kW</span>
+              </div>
+            )}
+            {data.specificYield > 0 && (
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-400">Specific Yield:</span>
+                <span className="font-medium text-amber-300">{data.specificYield} kWh/kWp</span>
+              </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -62,15 +69,15 @@ export default function DeviceDashboard() {
   const navigate = useNavigate();
 
   const [device, setDevice] = useState(() => getDeviceBySerial(serial));
-  const [liveData, setLiveData] = useState(() => getLastLiveData(serial)); // Pre-load cached data instantly
+  const [liveData, setLiveData] = useState(() => getLastLiveData(serial));
   const [lastSeen, setLastSeen] = useState(Date.now());
-  const [isOnline, setIsOnline] = useState(true);
-  const [viewMode, setViewMode] = useState('combined'); // 'combined' | '0' | '1' ...
+  const [isOnline, setIsOnline] = useState(false);
+  const [viewMode, setViewMode] = useState('combined');
   
-  // 10-Day Historical Analytics State
-  const [historyPeriod, setHistoryPeriod] = useState('10days'); // 'today' | 'yesterday' | '7days' | '10days' | '30days'
-  const [historyMetric, setHistoryMetric] = useState('energy'); // 'energy' | 'power'
-  const [historicalData, setHistoricalData] = useState(() => getHistoricalAnalytics(serial, '10days', device?.capacity_kw || 50));
+  // 10-Day Historical Analytics State (Real data only)
+  const [historyPeriod, setHistoryPeriod] = useState('10days');
+  const [historyMetric, setHistoryMetric] = useState('energy');
+  const [historicalData, setHistoricalData] = useState([]);
   const [tenDaySummaries, setTenDaySummaries] = useState([]);
   const [csvExporting, setCsvExporting] = useState(false);
   const [csvSuccess, setCsvSuccess] = useState(false);
@@ -84,7 +91,6 @@ export default function DeviceDashboard() {
     const dev = getDeviceBySerial(serial);
     setDevice(dev);
     
-    // Attempt instant pre-load from cache
     const cached = getLastLiveData(serial);
     if (cached) {
       setLiveData(cached);
@@ -160,17 +166,17 @@ export default function DeviceDashboard() {
     async function loadHistory() {
       const cap = device?.capacity_kw || 50;
       const data = await getHistoricalAnalyticsDB(serial, historyPeriod, cap);
-      if (isMounted && data && data.length > 0) {
-        setHistoricalData(data);
+      if (isMounted) {
+        setHistoricalData(data || []);
       }
       const summaries = await get10DayDailySummaries(serial, cap);
-      if (isMounted && summaries && summaries.length > 0) {
-        setTenDaySummaries(summaries);
+      if (isMounted) {
+        setTenDaySummaries(summaries || []);
       }
     }
     loadHistory();
     return () => { isMounted = false; };
-  }, [historyPeriod, serial, device?.capacity_kw]);
+  }, [historyPeriod, serial, device?.capacity_kw, liveData]);
 
   const handleSaveSiteDetails = () => {
     const updated = upsertDevice({ ...editForm, _userEdit: true });
@@ -233,7 +239,7 @@ export default function DeviceDashboard() {
 
   const powerKW = (ac_w / 1000).toFixed(2);
 
-  // MPPT Strings
+  // MPPT Strings (Real data only)
   const allStrings = [];
   inverters.forEach((inv, invIdx) => {
     if (!isCombined && parseInt(viewMode) !== invIdx) return;
@@ -283,6 +289,8 @@ export default function DeviceDashboard() {
   const heartbeatText = isOnline 
     ? (timeDiffSec < 5 ? 'Just now' : `${timeDiffSec}s ago`) 
     : 'Offline';
+
+  const hasAnyChartData = historicalData.some(d => (d.energy > 0) || (d.power > 0));
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-800 pb-20">
@@ -393,7 +401,7 @@ export default function DeviceDashboard() {
             <div className="bg-slate-50/80 md:bg-transparent p-3 md:p-0 rounded-xl md:rounded-none md:text-right border border-slate-100 md:border-none">
               <div className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest">Performance Ratio</div>
               <div className="text-lg md:text-2xl font-black text-slate-700 mt-0.5 md:mt-1">
-                {((parseFloat(powerKW) / (device.capacity_kw || 50)) * 100).toFixed(1)}%
+                {device.capacity_kw > 0 ? ((parseFloat(powerKW) / device.capacity_kw) * 100).toFixed(1) : '0.0'}%
               </div>
               <div className="text-[10px] md:text-xs text-slate-400 mt-1 md:mt-2 font-medium">Rated: {device.capacity_kw} kWp</div>
             </div>
@@ -536,7 +544,14 @@ export default function DeviceDashboard() {
           </div>
 
           {/* Interactive Chart */}
-          <div className="w-full h-64 md:h-72 pt-2">
+          <div className="w-full h-64 md:h-72 pt-2 relative">
+            {!hasAnyChartData && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/60 backdrop-blur-[1px] z-10 text-center p-4">
+                <Activity className="w-8 h-8 text-slate-300 mb-2 animate-pulse" />
+                <div className="text-sm font-bold text-slate-600">No telemetry recorded for this period yet</div>
+                <div className="text-xs text-slate-400 mt-1 max-w-sm">Data will populate automatically as the physical data logger transmits readings to the dashboard.</div>
+              </div>
+            )}
             <ResponsiveContainer width="100%" height="100%">
               {historyMetric === 'energy' ? (
                 <BarChart data={historicalData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -594,7 +609,7 @@ export default function DeviceDashboard() {
                       <th className="py-2.5 px-3">Peak Power</th>
                       <th className="py-2.5 px-3">Specific Yield</th>
                       <th className="py-2.5 px-3">Avg Temp</th>
-                      <th className="py-2.5 px-3">Performance</th>
+                      <th className="py-2.5 px-3">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 font-medium">
@@ -607,13 +622,19 @@ export default function DeviceDashboard() {
                             <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black">Today</span>
                           )}
                         </td>
-                        <td className="py-2.5 px-3 font-bold text-slate-800">{day.totalKwh} kWh</td>
-                        <td className="py-2.5 px-3 text-slate-700">{day.peakKw} kW</td>
-                        <td className="py-2.5 px-3 text-slate-600">{day.specificYield} kWh/kWp</td>
-                        <td className="py-2.5 px-3 text-slate-500">{day.avgTemp} °C</td>
+                        <td className="py-2.5 px-3 font-bold text-slate-800">{day.samplesCount > 0 ? `${day.totalKwh} kWh` : '--'}</td>
+                        <td className="py-2.5 px-3 text-slate-700">{day.samplesCount > 0 ? `${day.peakKw} kW` : '--'}</td>
+                        <td className="py-2.5 px-3 text-slate-600">{day.samplesCount > 0 ? `${day.specificYield} kWh/kWp` : '--'}</td>
+                        <td className="py-2.5 px-3 text-slate-500">{day.samplesCount > 0 ? `${day.avgTemp} °C` : '--'}</td>
                         <td className="py-2.5 px-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${day.status === 'Optimal' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
-                            {day.status}
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            day.samplesCount === 0
+                              ? 'bg-slate-100 text-slate-400'
+                              : day.status === 'Active' 
+                                ? 'bg-emerald-100 text-emerald-800' 
+                                : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {day.samplesCount === 0 ? 'No Data' : day.status}
                           </span>
                         </td>
                       </tr>

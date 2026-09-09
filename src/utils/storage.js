@@ -1,6 +1,7 @@
 /**
  * OES Solar Cloud - Multi-Device Registry & Historical Data Storage
  * Integrated with 10-Day IndexedDB Telemetry Storage Engine
+ * NO DEMO / SIMULATED READINGS
  */
 
 import { 
@@ -45,11 +46,8 @@ export function upsertDevice(deviceData) {
 
   const idx = devices.findIndex(d => d.serial_number === serial);
   if (idx >= 0) {
-    // Only update user-editable fields when explicitly passed (i.e. from Edit Site form)
-    // Never overwrite user edits with MQTT payload fields
     const isUserEdit = deviceData._userEdit === true;
     if (isUserEdit) {
-      // Full update from user edit form
       devices[idx] = {
         ...devices[idx],
         ...deviceData,
@@ -57,7 +55,6 @@ export function upsertDevice(deviceData) {
       };
       delete devices[idx]._userEdit;
     } else {
-      // MQTT / auto update: only touch status and last_seen
       devices[idx] = {
         ...devices[idx],
         status: deviceData.status || devices[idx].status || 'online',
@@ -67,9 +64,9 @@ export function upsertDevice(deviceData) {
   } else {
     devices.unshift({
       serial_number: serial,
-      client_name: deviceData.client_name || deviceData.plant || 'Solar Client',
+      client_name: deviceData.client_name || deviceData.plant || `Site ${serial}`,
       site_name: deviceData.site_name || 'Solar Site',
-      location: deviceData.location || 'Maharashtra, India',
+      location: deviceData.location || 'Unknown Location',
       inverter_model: deviceData.inverter_model || 'Solar Inverter',
       capacity_kw: deviceData.capacity_kw || 50,
       status: deviceData.status || 'online',
@@ -84,7 +81,6 @@ export function upsertDevice(deviceData) {
 export function deleteDevice(serial) {
   const devices = getDevices().filter(d => d.serial_number !== serial);
   saveDevices(devices);
-  // Blacklist: prevent MQTT from auto-re-registering this device
   try {
     const bl = JSON.parse(localStorage.getItem('oes_deleted_serials') || '[]');
     if (!bl.includes(serial)) bl.push(serial);
@@ -104,19 +100,16 @@ export function getDeviceBySerial(serial) {
   const devices = getDevices();
   return devices.find(d => d.serial_number === serial) || {
     serial_number: serial,
-    client_name: 'Solar Client',
+    client_name: 'Solar Plant',
     site_name: 'Solar Site',
-    location: 'Maharashtra, India',
+    location: '',
     inverter_model: 'Solar Inverter',
     capacity_kw: 50,
-    status: 'online',
-    last_seen: new Date().toISOString()
+    status: 'offline',
+    last_seen: null
   };
 }
 
-/**
- * Save the very latest raw live payload for instant display when navigating to DeviceDashboard
- */
 export function saveLastLiveData(serial, data) {
   try {
     if (!serial || !data) return;
@@ -124,10 +117,6 @@ export function saveLastLiveData(serial, data) {
   } catch (e) {}
 }
 
-/**
- * Get the last known live payload so DeviceDashboard can display it immediately
- * instead of showing zeros while waiting for the next MQTT packet
- */
 export function getLastLiveData(serial) {
   try {
     if (!serial) return null;
@@ -166,20 +155,18 @@ export function recordDeviceTelemetry(serial, liveData) {
       time: timeStr,
       power: parseFloat(kw.toFixed(2)),
       energy: parseFloat(kwh.toFixed(1)),
-      ac_v: liveData.ac_v || (liveData.inv && liveData.inv[0] ? liveData.inv[0].ac_v : 230),
-      pv_v: liveData.pv_v || (liveData.inv && liveData.inv[0] ? liveData.inv[0].pv_v : 600),
-      temp: liveData.temp || (liveData.inv && liveData.inv[0] ? liveData.inv[0].temp : 45)
+      ac_v: liveData.ac_v || (liveData.inv && liveData.inv[0] ? liveData.inv[0].ac_v : 0),
+      pv_v: liveData.pv_v || (liveData.inv && liveData.inv[0] ? liveData.inv[0].pv_v : 0),
+      temp: liveData.temp || (liveData.inv && liveData.inv[0] ? liveData.inv[0].temp : 0)
     });
 
     if (history.length > 200) history.shift();
     localStorage.setItem(key, JSON.stringify(history));
-  } catch (e) {
-    // Ignore storage quota
-  }
+  } catch (e) {}
 }
 
 /**
- * Synchronous initial fallback while IndexedDB loads
+ * Initial empty template - no fake curves or random numbers
  */
 export function getHistoricalAnalytics(serial, period = '10days', capacityKw = 50) {
   const now = new Date();
@@ -193,14 +180,7 @@ export function getHistoricalAnalytics(serial, period = '10days', capacityKw = 5
       if (period === 'today' && hourNum > currentHour) {
         return { time: h, power: null, energy: null };
       }
-      const distanceFromNoon = Math.abs(12.5 - hourNum);
-      const maxPower = capacityKw * 0.85;
-      let simulatedPower = Math.max(0, maxPower - (distanceFromNoon * distanceFromNoon * (capacityKw * 0.05)));
-      return { 
-        time: h, 
-        power: Number(simulatedPower.toFixed(2)), 
-        energy: Number((simulatedPower * 0.95).toFixed(2)) 
-      };
+      return { time: h, power: 0, energy: 0 };
     });
   }
 
@@ -211,9 +191,7 @@ export function getHistoricalAnalytics(serial, period = '10days', capacityKw = 5
       d.setDate(d.getDate() - (count - 1 - i));
       const label = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
       const day = d.toLocaleDateString('en-US', { weekday: 'short' });
-      const energy = Number((capacityKw * (3.5 + ((d.getDate() % 4) * 0.35))).toFixed(1));
-      const power = Number((capacityKw * (0.72 + ((d.getDate() % 3) * 0.04))).toFixed(2));
-      return { time: label, day, energy, power, specificYield: Number((energy / capacityKw).toFixed(2)) };
+      return { time: label, day, energy: 0, power: 0, specificYield: 0 };
     });
   }
 
@@ -222,8 +200,7 @@ export function getHistoricalAnalytics(serial, period = '10days', capacityKw = 5
       const d = new Date(); 
       d.setDate(d.getDate() - (29 - i));
       const label = d.getDate() + '/' + (d.getMonth() + 1);
-      const energy = Number((capacityKw * (3.2 + Math.random() * 2.8)).toFixed(1));
-      return { time: label, energy, power: Number((energy / 8).toFixed(2)) };
+      return { time: label, energy: 0, power: 0 };
     });
   }
 

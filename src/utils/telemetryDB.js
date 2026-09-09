@@ -2,6 +2,7 @@
  * OES Solar Cloud - 10-Day Persistent Telemetry Storage Engine (IndexedDB)
  * Stores granular telemetry readings, calculates 10-day generation curves,
  * and enables raw CSV data export with automatic 10-day rolling prune.
+ * NO DEMO / SIMULATED READINGS: Only actual received telemetry is stored and displayed.
  */
 
 const DB_NAME = 'OES_TelemetryDB';
@@ -15,7 +16,7 @@ const lastRecordTime = {};
  * Open or initialize the IndexedDB database
  */
 function openDB() {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
       resolve(null);
       return;
@@ -71,7 +72,6 @@ export async function recordReading(serial, liveData) {
       kw = liveData.inv.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0) / 1000;
       kwh = liveData.inv.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0);
       invertersSummary = liveData.inv.map(i => {
-        // Collect string data
         const strings = [];
         for (let s = 1; s <= 16; s++) {
           const vKey = 'str' + s + '_v';
@@ -109,11 +109,11 @@ export async function recordReading(serial, liveData) {
       timeStr,
       powerKw: Number(kw.toFixed(2)),
       energyKwh: Number(kwh.toFixed(2)),
-      ac_v: liveData.ac_v || (invertersSummary[0]?.ac_v) || 230,
+      ac_v: liveData.ac_v || (invertersSummary[0]?.ac_v) || 0,
       ac_a: liveData.ac_a || (invertersSummary[0]?.ac_a) || 0,
-      pv_v: liveData.pv_v || (invertersSummary[0]?.pv_v) || 600,
-      temp: liveData.temp || (invertersSummary[0]?.temp) || 45,
-      freq: liveData.freq || 50.0,
+      pv_v: liveData.pv_v || (invertersSummary[0]?.pv_v) || 0,
+      temp: liveData.temp || (invertersSummary[0]?.temp) || 0,
+      freq: liveData.freq || 0,
       inverters: invertersSummary
     };
 
@@ -163,6 +163,7 @@ export async function getReadings(serial, startTime, endTime = Date.now()) {
 
 /**
  * Generate 10-day daily summaries (past 10 days including today)
+ * Returns purely real readings (0 / No Data if no telemetry was logged for that day)
  */
 export async function get10DayDailySummaries(serial, capacityKw = 50) {
   const now = new Date();
@@ -187,22 +188,19 @@ export async function get10DayDailySummaries(serial, capacityKw = 50) {
 
     let totalKwh = 0;
     let peakKw = 0;
-    let avgTemp = 45;
+    let avgTemp = 0;
+    let status = 'No Data';
 
     if (dayReadings.length > 0) {
       peakKw = Math.max(...dayReadings.map(r => r.powerKw || 0));
-      // Energy: maximum e_day recorded during that day
       totalKwh = Math.max(...dayReadings.map(r => r.energyKwh || 0));
-      avgTemp = Number((dayReadings.reduce((s, r) => s + (r.temp || 45), 0) / dayReadings.length).toFixed(1));
-    } else {
-      // Realistic historical baseline if logger was commissioned recently
-      const factor = (3.6 + ((d.getDate() % 5) * 0.45));
-      totalKwh = Number((capacityKw * factor).toFixed(1));
-      peakKw = Number((capacityKw * (0.75 + ((d.getDate() % 3) * 0.05))).toFixed(2));
-      avgTemp = Number((42 + (d.getDate() % 6)).toFixed(1));
+      avgTemp = Number((dayReadings.reduce((s, r) => s + (r.temp || 0), 0) / dayReadings.length).toFixed(1));
+      status = totalKwh > 0 ? 'Active' : 'Standby';
     }
 
-    const specificYield = Number((totalKwh / (capacityKw || 50)).toFixed(2)); // kWh/kWp
+    const specificYield = capacityKw > 0 && totalKwh > 0 
+      ? Number((totalKwh / capacityKw).toFixed(2)) 
+      : 0;
 
     summaries.push({
       dateStr,
@@ -213,7 +211,7 @@ export async function get10DayDailySummaries(serial, capacityKw = 50) {
       peakKw: Number(peakKw.toFixed(2)),
       specificYield,
       avgTemp,
-      status: totalKwh > (capacityKw * 2.5) ? 'Optimal' : 'Normal',
+      status: dayReadings.length > 0 ? status : 'No Data',
       samplesCount: dayReadings.length
     });
   }
@@ -223,6 +221,7 @@ export async function get10DayDailySummaries(serial, capacityKw = 50) {
 
 /**
  * Returns chart analytics data for: 'today', 'yesterday', '7days', '10days', '30days'
+ * Strictly real data only - no simulated values
  */
 export async function getHistoricalAnalyticsDB(serial, period = '10days', capacityKw = 50) {
   const now = new Date();
@@ -238,11 +237,7 @@ export async function getHistoricalAnalyticsDB(serial, period = '10days', capaci
       if (hourNum > currentHour) {
         return { time: h, power: null, energy: null };
       }
-      // Match real readings for this hour
-      const matches = readings.filter(r => {
-        const d = new Date(r.timestamp);
-        return d.getHours() === hourNum;
-      });
+      const matches = readings.filter(r => new Date(r.timestamp).getHours() === hourNum);
 
       if (matches.length > 0) {
         const maxP = Math.max(...matches.map(m => m.powerKw || 0));
@@ -250,11 +245,8 @@ export async function getHistoricalAnalyticsDB(serial, period = '10days', capaci
         return { time: h, power: Number(maxP.toFixed(2)), energy: Number(maxE.toFixed(1)) };
       }
 
-      // Baseline fallback for today
-      const distanceFromNoon = Math.abs(12.5 - hourNum);
-      const maxPower = capacityKw * 0.85;
-      let p = Math.max(0, maxPower - (distanceFromNoon * distanceFromNoon * (capacityKw * 0.05)));
-      return { time: h, power: Number(p.toFixed(2)), energy: Number((p * 0.9).toFixed(1)) };
+      // No fake curve - return 0 if no readings captured for that hour
+      return { time: h, power: 0, energy: 0 };
     });
   }
 
@@ -274,10 +266,7 @@ export async function getHistoricalAnalyticsDB(serial, period = '10days', capaci
           energy: Number(Math.max(...matches.map(m => m.energyKwh || 0)).toFixed(1))
         };
       }
-      const distanceFromNoon = Math.abs(12.5 - hourNum);
-      const maxPower = capacityKw * 0.82;
-      let p = Math.max(0, maxPower - (distanceFromNoon * distanceFromNoon * (capacityKw * 0.05)));
-      return { time: h, power: Number(p.toFixed(2)), energy: Number((p * 0.95).toFixed(1)) };
+      return { time: h, power: 0, energy: 0 };
     });
   }
 
@@ -290,22 +279,22 @@ export async function getHistoricalAnalyticsDB(serial, period = '10days', capaci
       energy: s.totalKwh,
       power: s.peakKw,
       specificYield: s.specificYield,
-      isToday: s.isToday
+      isToday: s.isToday,
+      samplesCount: s.samplesCount
     }));
   }
 
   if (period === '7days') {
     const summaries = await get10DayDailySummaries(serial, capacityKw);
-    // Take the last 7 days
     return summaries.slice(3).map(s => ({
       time: s.dayName + ' ' + s.formattedDate,
       energy: s.totalKwh,
-      power: s.peakKw
+      power: s.peakKw,
+      samplesCount: s.samplesCount
     }));
   }
 
   if (period === '30days') {
-    // 30 days projection
     const summaries = await get10DayDailySummaries(serial, capacityKw);
     const map = {};
     summaries.forEach(s => { map[s.dateStr] = s; });
@@ -317,10 +306,14 @@ export async function getHistoricalAnalyticsDB(serial, period = '10days', capaci
       const label = d.getDate() + '/' + (d.getMonth() + 1);
 
       if (map[dateStr]) {
-        return { time: label, energy: map[dateStr].totalKwh, power: map[dateStr].peakKw };
+        return { 
+          time: label, 
+          energy: map[dateStr].totalKwh, 
+          power: map[dateStr].peakKw,
+          samplesCount: map[dateStr].samplesCount
+        };
       }
-      const energy = Number((capacityKw * (3.2 + Math.random() * 2.5)).toFixed(1));
-      return { time: label, energy, power: Number((energy / 8).toFixed(2)) };
+      return { time: label, energy: 0, power: 0, samplesCount: 0 };
     });
   }
 
@@ -340,7 +333,6 @@ export async function export10DayCSV(serial, siteMetadata = {}) {
   const capacityKw = siteMetadata.capacity_kw || 50;
 
   let csv = [];
-  // Header Block
   csv.push('"ONE EARTH SOLAR - 10-DAY TELEMETRY & READING AUDIT REPORT"');
   csv.push(`"Client Name","${clientName}"`);
   csv.push(`"Site Name","${siteName}"`);
@@ -351,7 +343,6 @@ export async function export10DayCSV(serial, siteMetadata = {}) {
   csv.push(`"Total Logged Records","${readings.length}"`);
   csv.push('');
 
-  // Column Headers
   const headers = [
     'Record ID',
     'Date',
@@ -370,22 +361,7 @@ export async function export10DayCSV(serial, siteMetadata = {}) {
   csv.push(headers.map(h => `"${h}"`).join(','));
 
   if (readings.length === 0) {
-    // Generate helpful placeholder row if user exports right away before readings accumulate
-    csv.push([
-      '1',
-      now.toISOString().split('T')[0],
-      now.toLocaleTimeString(),
-      now.getTime(),
-      (capacityKw * 0.65).toFixed(2),
-      (capacityKw * 3.8).toFixed(1),
-      '230.0',
-      '85.2',
-      '50.0',
-      '620.0',
-      '44.5',
-      '2',
-      '"Inv 1: 5 Strings active | Inv 2: 4 Strings active"'
-    ].join(','));
+    csv.push('"No telemetry readings recorded for this 10-day period. Please ensure logger is online and transmitting."');
   } else {
     readings.forEach((r, idx) => {
       let invSummaryStr = '';
@@ -403,9 +379,9 @@ export async function export10DayCSV(serial, siteMetadata = {}) {
         r.timestamp,
         r.powerKw,
         r.energyKwh,
-        r.ac_v || 230,
+        r.ac_v || 0,
         r.ac_a || 0,
-        r.freq || 50,
+        r.freq || 0,
         r.pv_v || 0,
         r.temp || 0,
         (r.inverters ? r.inverters.length : 1),
