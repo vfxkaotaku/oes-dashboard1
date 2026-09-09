@@ -1,19 +1,16 @@
 /**
- * OES Solar Cloud - 10-Day Persistent Telemetry Storage Engine (IndexedDB)
- * Stores granular telemetry readings, calculates 10-day generation curves,
- * and enables raw CSV data export with automatic 10-day rolling prune.
- * NO DEMO / SIMULATED READINGS: Only actual received telemetry is stored and displayed.
+ * OES Solar Cloud - 10-Day Peak Telemetry Storage Engine (IndexedDB)
+ * Stores ONLY the PEAK generation of each day (1 record per day per device).
+ * Tracks maximum active power (kW), peak time, total daily energy (kWh),
+ * and string values at peak, with automatic 10-day rolling prune.
  */
 
 const DB_NAME = 'OES_TelemetryDB';
-const DB_VERSION = 1;
-const STORE_READINGS = 'readings';
-
-// In-memory throttle cache to prevent recording every 200ms
-const lastRecordTime = {};
+const DB_VERSION = 2;
+const STORE_PEAKS = 'daily_peaks';
 
 /**
- * Open or initialize the IndexedDB database
+ * Open or initialize IndexedDB with daily_peaks store
  */
 function openDB() {
   return new Promise((resolve) => {
@@ -25,11 +22,10 @@ function openDB() {
 
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
-      if (!db.objectStoreNames.contains(STORE_READINGS)) {
-        const store = db.createObjectStore(STORE_READINGS, { keyPath: 'id', autoIncrement: true });
+      if (!db.objectStoreNames.contains(STORE_PEAKS)) {
+        const store = db.createObjectStore(STORE_PEAKS, { keyPath: 'id' });
         store.createIndex('serial', 'serial', { unique: false });
         store.createIndex('timestamp', 'timestamp', { unique: false });
-        store.createIndex('serial_time', ['serial', 'timestamp'], { unique: false });
         store.createIndex('dateStr', 'dateStr', { unique: false });
       }
     };
@@ -43,26 +39,20 @@ function openDB() {
 }
 
 /**
- * Record a live telemetry packet into IndexedDB
- * Prunes records older than 10 days automatically
+ * Record incoming telemetry - updates ONLY the daily peak for this date
  */
 export async function recordReading(serial, liveData) {
   try {
     if (!serial || !liveData) return;
 
-    const now = Date.now();
-    // Throttle: Record at most once every 30 seconds per serial unless first reading
-    if (lastRecordTime[serial] && (now - lastRecordTime[serial]) < 30000) {
-      return;
-    }
-    lastRecordTime[serial] = now;
-
     const db = await openDB();
     if (!db) return;
 
+    const now = Date.now();
     const nowDate = new Date(now);
     const dateStr = nowDate.toISOString().split('T')[0]; // YYYY-MM-DD
-    const timeStr = nowDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const timeStr = nowDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const dayId = `${serial}_${dateStr}`;
 
     let kw = 0;
     let kwh = 0;
@@ -102,36 +92,75 @@ export async function recordReading(serial, liveData) {
       kwh = parseFloat(liveData.e_day) || 0;
     }
 
-    const entry = {
-      serial,
-      timestamp: now,
-      dateStr,
-      timeStr,
-      powerKw: Number(kw.toFixed(2)),
-      energyKwh: Number(kwh.toFixed(2)),
-      ac_v: liveData.ac_v || (invertersSummary[0]?.ac_v) || 0,
-      ac_a: liveData.ac_a || (invertersSummary[0]?.ac_a) || 0,
-      pv_v: liveData.pv_v || (invertersSummary[0]?.pv_v) || 0,
-      temp: liveData.temp || (invertersSummary[0]?.temp) || 0,
-      freq: liveData.freq || 0,
-      inverters: invertersSummary
-    };
+    kw = Number(kw.toFixed(2));
+    kwh = Number(kwh.toFixed(2));
 
-    const tx = db.transaction(STORE_READINGS, 'readwrite');
-    const store = tx.objectStore(STORE_READINGS);
-    store.add(entry);
+    const tx = db.transaction(STORE_PEAKS, 'readwrite');
+    const store = tx.objectStore(STORE_PEAKS);
+    const getReq = store.get(dayId);
 
-    // Auto-prune readings older than 10 days (10 * 24 * 60 * 60 * 1000 ms)
-    const cutoff = now - (10 * 24 * 60 * 60 * 1000);
-    const timeIndex = store.index('timestamp');
-    const oldRange = IDBKeyRange.upperBound(cutoff);
-    const delReq = timeIndex.openKeyCursor(oldRange);
-    delReq.onsuccess = (e) => {
-      const cursor = e.target.result;
-      if (cursor) {
-        store.delete(cursor.primaryKey);
-        cursor.continue();
+    getReq.onsuccess = () => {
+      const existing = getReq.result;
+
+      if (!existing) {
+        // First record of the day
+        store.put({
+          id: dayId,
+          serial,
+          dateStr,
+          timestamp: now,
+          peakPowerKw: kw,
+          peakTimeStr: timeStr,
+          totalEnergyKwh: kwh,
+          ac_v: liveData.ac_v || (invertersSummary[0]?.ac_v) || 0,
+          ac_a: liveData.ac_a || (invertersSummary[0]?.ac_a) || 0,
+          pv_v: liveData.pv_v || (invertersSummary[0]?.pv_v) || 0,
+          temp: liveData.temp || (invertersSummary[0]?.temp) || 0,
+          freq: liveData.freq || 0,
+          inverters: invertersSummary,
+          updatesCount: 1
+        });
+      } else {
+        // Update existing daily record with new peak values
+        const isNewPeakPower = kw >= (existing.peakPowerKw || 0);
+        const maxEnergy = Math.max(existing.totalEnergyKwh || 0, kwh);
+
+        const updated = {
+          ...existing,
+          timestamp: now, // refresh timestamp for retention
+          totalEnergyKwh: maxEnergy,
+          updatesCount: (existing.updatesCount || 1) + 1
+        };
+
+        // If current output power is higher than today's recorded peak, update peak snapshot
+        if (isNewPeakPower) {
+          updated.peakPowerKw = kw;
+          updated.peakTimeStr = timeStr;
+          updated.ac_v = liveData.ac_v || (invertersSummary[0]?.ac_v) || existing.ac_v;
+          updated.ac_a = liveData.ac_a || (invertersSummary[0]?.ac_a) || existing.ac_a;
+          updated.pv_v = liveData.pv_v || (invertersSummary[0]?.pv_v) || existing.pv_v;
+          updated.temp = liveData.temp || (invertersSummary[0]?.temp) || existing.temp;
+          updated.freq = liveData.freq || existing.freq;
+          if (invertersSummary.length > 0) {
+            updated.inverters = invertersSummary;
+          }
+        }
+
+        store.put(updated);
       }
+
+      // Auto-prune records older than 10 days
+      const cutoff = now - (10 * 24 * 60 * 60 * 1000);
+      const timeIndex = store.index('timestamp');
+      const oldRange = IDBKeyRange.upperBound(cutoff);
+      const delReq = timeIndex.openKeyCursor(oldRange);
+      delReq.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          store.delete(cursor.primaryKey);
+          cursor.continue();
+        }
+      };
     };
   } catch (err) {
     console.warn('OES IndexedDB recordReading error:', err);
@@ -139,19 +168,18 @@ export async function recordReading(serial, liveData) {
 }
 
 /**
- * Get all readings for a device within a time range
+ * Get all daily peak records for a device
  */
-export async function getReadings(serial, startTime, endTime = Date.now()) {
+export async function getDailyPeaks(serial) {
   const db = await openDB();
   if (!db) return [];
 
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction(STORE_READINGS, 'readonly');
-      const store = tx.objectStore(STORE_READINGS);
-      const index = store.index('serial_time');
-      const range = IDBKeyRange.bound([serial, startTime], [serial, endTime]);
-      const req = index.getAll(range);
+      const tx = db.transaction(STORE_PEAKS, 'readonly');
+      const store = tx.objectStore(STORE_PEAKS);
+      const index = store.index('serial');
+      const req = index.getAll(serial);
 
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = () => resolve([]);
@@ -162,19 +190,13 @@ export async function getReadings(serial, startTime, endTime = Date.now()) {
 }
 
 /**
- * Generate 10-day daily summaries (past 10 days including today)
- * Returns purely real readings (0 / No Data if no telemetry was logged for that day)
+ * Generate 10-day summaries from the daily peak records
  */
 export async function get10DayDailySummaries(serial, capacityKw = 50) {
-  const now = new Date();
-  const tenDaysAgo = now.getTime() - (10 * 24 * 60 * 60 * 1000);
-  const realReadings = await getReadings(serial, tenDaysAgo, now.getTime());
-
-  // Group readings by dateStr
-  const grouped = {};
-  realReadings.forEach(r => {
-    if (!grouped[r.dateStr]) grouped[r.dateStr] = [];
-    grouped[r.dateStr].push(r);
+  const peaks = await getDailyPeaks(serial);
+  const peakMap = {};
+  peaks.forEach(p => {
+    peakMap[p.dateStr] = p;
   });
 
   const summaries = [];
@@ -184,22 +206,16 @@ export async function get10DayDailySummaries(serial, capacityKw = 50) {
     const dateStr = d.toISOString().split('T')[0];
     const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
     const formattedDate = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
-    const dayReadings = grouped[dateStr] || [];
+    const record = peakMap[dateStr];
 
-    let totalKwh = 0;
-    let peakKw = 0;
-    let avgTemp = 0;
-    let status = 'No Data';
-
-    if (dayReadings.length > 0) {
-      peakKw = Math.max(...dayReadings.map(r => r.powerKw || 0));
-      totalKwh = Math.max(...dayReadings.map(r => r.energyKwh || 0));
-      avgTemp = Number((dayReadings.reduce((s, r) => s + (r.temp || 0), 0) / dayReadings.length).toFixed(1));
-      status = totalKwh > 0 ? 'Active' : 'Standby';
-    }
-
-    const specificYield = capacityKw > 0 && totalKwh > 0 
-      ? Number((totalKwh / capacityKw).toFixed(2)) 
+    const hasData = !!record;
+    const totalKwh = record ? record.totalEnergyKwh : 0;
+    const peakKw = record ? record.peakPowerKw : 0;
+    const peakTime = record ? record.peakTimeStr : '--';
+    const avgTemp = record ? record.temp : 0;
+    const status = hasData ? (totalKwh > 0 ? 'Active' : 'Standby') : 'No Data';
+    const specificYield = (hasData && capacityKw > 0 && totalKwh > 0)
+      ? Number((totalKwh / capacityKw).toFixed(2))
       : 0;
 
     summaries.push({
@@ -207,12 +223,14 @@ export async function get10DayDailySummaries(serial, capacityKw = 50) {
       dayName,
       formattedDate,
       isToday: i === 0,
-      totalKwh: Number(totalKwh.toFixed(1)),
-      peakKw: Number(peakKw.toFixed(2)),
+      totalKwh,
+      peakKw,
+      peakTime,
       specificYield,
       avgTemp,
-      status: dayReadings.length > 0 ? status : 'No Data',
-      samplesCount: dayReadings.length
+      status,
+      hasData,
+      inverters: record?.inverters || []
     });
   }
 
@@ -221,81 +239,50 @@ export async function get10DayDailySummaries(serial, capacityKw = 50) {
 
 /**
  * Returns chart analytics data for: 'today', 'yesterday', '7days', '10days', '30days'
- * Strictly real data only - no simulated values
  */
 export async function getHistoricalAnalyticsDB(serial, period = '10days', capacityKw = 50) {
-  const now = new Date();
-
-  if (period === 'today') {
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const readings = await getReadings(serial, startOfToday, now.getTime());
-    const hours = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-    const currentHour = now.getHours();
-
-    return hours.map((h, idx) => {
-      const hourNum = 6 + idx;
-      if (hourNum > currentHour) {
-        return { time: h, power: null, energy: null };
-      }
-      const matches = readings.filter(r => new Date(r.timestamp).getHours() === hourNum);
-
-      if (matches.length > 0) {
-        const maxP = Math.max(...matches.map(m => m.powerKw || 0));
-        const maxE = Math.max(...matches.map(m => m.energyKwh || 0));
-        return { time: h, power: Number(maxP.toFixed(2)), energy: Number(maxE.toFixed(1)) };
-      }
-
-      // No fake curve - return 0 if no readings captured for that hour
-      return { time: h, power: 0, energy: 0 };
-    });
-  }
-
-  if (period === 'yesterday') {
-    const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
-    const endOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - 1;
-    const readings = await getReadings(serial, startOfYesterday, endOfYesterday);
-    const hours = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-
-    return hours.map((h, idx) => {
-      const hourNum = 6 + idx;
-      const matches = readings.filter(r => new Date(r.timestamp).getHours() === hourNum);
-      if (matches.length > 0) {
-        return {
-          time: h,
-          power: Number(Math.max(...matches.map(m => m.powerKw || 0)).toFixed(2)),
-          energy: Number(Math.max(...matches.map(m => m.energyKwh || 0)).toFixed(1))
-        };
-      }
-      return { time: h, power: 0, energy: 0 };
-    });
-  }
+  const summaries = await get10DayDailySummaries(serial, capacityKw);
 
   if (period === '10days') {
-    const summaries = await get10DayDailySummaries(serial, capacityKw);
     return summaries.map(s => ({
       time: s.formattedDate,
       fullDate: s.dateStr,
       day: s.dayName,
       energy: s.totalKwh,
       power: s.peakKw,
+      peakTime: s.peakTime,
       specificYield: s.specificYield,
       isToday: s.isToday,
-      samplesCount: s.samplesCount
+      hasData: s.hasData
     }));
   }
 
   if (period === '7days') {
-    const summaries = await get10DayDailySummaries(serial, capacityKw);
     return summaries.slice(3).map(s => ({
       time: s.dayName + ' ' + s.formattedDate,
       energy: s.totalKwh,
       power: s.peakKw,
-      samplesCount: s.samplesCount
+      hasData: s.hasData
     }));
   }
 
+  if (period === 'today') {
+    const todaySummary = summaries[summaries.length - 1];
+    return [
+      { time: 'Peak Power', power: todaySummary?.peakKw || 0, energy: null, day: todaySummary?.peakTime || '' },
+      { time: 'Today Yield', power: null, energy: todaySummary?.totalKwh || 0, day: 'Total' }
+    ];
+  }
+
+  if (period === 'yesterday') {
+    const yestSummary = summaries[summaries.length - 2];
+    return [
+      { time: 'Peak Power', power: yestSummary?.peakKw || 0, energy: null, day: yestSummary?.peakTime || '' },
+      { time: 'Daily Yield', power: null, energy: yestSummary?.totalKwh || 0, day: 'Total' }
+    ];
+  }
+
   if (period === '30days') {
-    const summaries = await get10DayDailySummaries(serial, capacityKw);
     const map = {};
     summaries.forEach(s => { map[s.dateStr] = s; });
 
@@ -310,10 +297,10 @@ export async function getHistoricalAnalyticsDB(serial, period = '10days', capaci
           time: label, 
           energy: map[dateStr].totalKwh, 
           power: map[dateStr].peakKw,
-          samplesCount: map[dateStr].samplesCount
+          hasData: map[dateStr].hasData
         };
       }
-      return { time: label, energy: 0, power: 0, samplesCount: 0 };
+      return { time: label, energy: 0, power: 0, hasData: false };
     });
   }
 
@@ -321,70 +308,62 @@ export async function getHistoricalAnalyticsDB(serial, period = '10days', capaci
 }
 
 /**
- * Export all 10-day reading data to a clean, auditor-ready CSV file
+ * Export 10-day peak readings to a clean auditor-ready CSV file
  */
 export async function export10DayCSV(serial, siteMetadata = {}) {
+  const summaries = await get10DayDailySummaries(serial, siteMetadata.capacity_kw || 50);
   const now = new Date();
-  const tenDaysAgo = now.getTime() - (10 * 24 * 60 * 60 * 1000);
-  const readings = await getReadings(serial, tenDaysAgo, now.getTime());
 
   const clientName = siteMetadata.client_name || 'ONE EARTH Solar Client';
   const siteName = siteMetadata.site_name || 'Solar Plant';
   const capacityKw = siteMetadata.capacity_kw || 50;
 
   let csv = [];
-  csv.push('"ONE EARTH SOLAR - 10-DAY TELEMETRY & READING AUDIT REPORT"');
+  csv.push('"ONE EARTH SOLAR - 10-DAY DAILY PEAK GENERATION AUDIT REPORT"');
   csv.push(`"Client Name","${clientName}"`);
   csv.push(`"Site Name","${siteName}"`);
   csv.push(`"Logger Serial Number","${serial}"`);
   csv.push(`"Plant Capacity","${capacityKw} kWp"`);
+  csv.push(`"Report Type","Daily Peak Generation & Yield (10 Days)"`);
   csv.push(`"Export Timestamp","${now.toISOString()}"`);
-  csv.push(`"Retention Window","10 Days (${new Date(tenDaysAgo).toLocaleDateString()} to ${now.toLocaleDateString()})"`);
-  csv.push(`"Total Logged Records","${readings.length}"`);
   csv.push('');
 
   const headers = [
-    'Record ID',
     'Date',
-    'Time',
-    'Timestamp (ms)',
-    'Total Active Power (kW)',
-    'Daily Yield (kWh)',
-    'Grid Voltage (V)',
-    'Grid Current (A)',
-    'Frequency (Hz)',
-    'PV Voltage (V)',
-    'Internal Temp (deg C)',
-    'Inverters Count',
-    'Inverters Data & Strings Breakdown'
+    'Day of Week',
+    'Peak Active Power (kW)',
+    'Peak Power Timestamp',
+    'Total Daily Yield (kWh)',
+    'Specific Yield (kWh/kWp)',
+    'Average Temp (°C)',
+    'Operational Status',
+    'Peak Inverters & Strings Detail'
   ];
   csv.push(headers.map(h => `"${h}"`).join(','));
 
-  if (readings.length === 0) {
-    csv.push('"No telemetry readings recorded for this 10-day period. Please ensure logger is online and transmitting."');
+  const activeDays = summaries.filter(s => s.hasData);
+
+  if (activeDays.length === 0) {
+    csv.push('"No peak telemetry records logged yet for this 10-day period."');
   } else {
-    readings.forEach((r, idx) => {
+    summaries.forEach((s) => {
       let invSummaryStr = '';
-      if (r.inverters && r.inverters.length > 0) {
-        invSummaryStr = r.inverters.map(inv => {
-          const strList = inv.strings ? inv.strings.map(s => `Str${s.id}:${s.v}V/${s.a}A`).join(' ') : 'None';
+      if (s.inverters && s.inverters.length > 0) {
+        invSummaryStr = s.inverters.map(inv => {
+          const strList = inv.strings ? inv.strings.map(str => `Str${str.id}:${str.v}V/${str.a}A`).join(' ') : 'None';
           return `[Inv ${inv.addr}: ${(inv.ac_w/1000).toFixed(2)}kW, ${strList}]`;
         }).join(' ; ');
       }
 
       const row = [
-        idx + 1,
-        `"${r.dateStr}"`,
-        `"${r.timeStr}"`,
-        r.timestamp,
-        r.powerKw,
-        r.energyKwh,
-        r.ac_v || 0,
-        r.ac_a || 0,
-        r.freq || 0,
-        r.pv_v || 0,
-        r.temp || 0,
-        (r.inverters ? r.inverters.length : 1),
+        `"${s.dateStr}"`,
+        `"${s.dayName}"`,
+        s.hasData ? s.peakKw : 0,
+        `"${s.hasData ? s.peakTime : '--'}"`,
+        s.hasData ? s.totalKwh : 0,
+        s.hasData ? s.specificYield : 0,
+        s.hasData ? s.avgTemp : 0,
+        `"${s.status}"`,
         `"${invSummaryStr.replace(/"/g, '""')}"`
       ];
       csv.push(row.join(','));
@@ -396,7 +375,7 @@ export async function export10DayCSV(serial, siteMetadata = {}) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.setAttribute('href', url);
-  link.setAttribute('download', `OES_${serial}_10Day_Telemetry_${now.toISOString().split('T')[0]}.csv`);
+  link.setAttribute('download', `OES_${serial}_10Day_Daily_Peaks_${now.toISOString().split('T')[0]}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
