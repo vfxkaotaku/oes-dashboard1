@@ -3,14 +3,59 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Download, Sun, Zap, Layers, Activity, 
   MapPin, Clock, Edit, CheckCircle2, AlertTriangle, ShieldCheck, 
-  Calendar, TrendingUp, BarChart3, Database, RefreshCw, X, ShieldAlert, Cpu
+  Calendar, TrendingUp, BarChart3, Database, RefreshCw, X, ShieldAlert, Cpu,
+  FileSpreadsheet, CalendarDays, History, Sparkles, Check, HardDrive
 } from 'lucide-react';
 import mqtt from 'mqtt';
 import { 
-  ResponsiveContainer, Tooltip, PieChart, Pie, Cell 
+  ResponsiveContainer, Tooltip, PieChart, Pie, Cell,
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
-import { getDeviceBySerial, upsertDevice, recordDeviceTelemetry, getHistoricalAnalytics, getLastLiveData, saveLastLiveData } from '../utils/storage';
+import { 
+  getDeviceBySerial, 
+  upsertDevice, 
+  recordDeviceTelemetry, 
+  getHistoricalAnalytics, 
+  getLastLiveData, 
+  saveLastLiveData,
+  getHistoricalAnalyticsDB,
+  get10DayDailySummaries,
+  export10DayCSV
+} from '../utils/storage';
 import { generateSolarPdfReport } from '../utils/pdfGenerator';
+
+function CustomHistoryTooltip({ active, payload, label }) {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-slate-900 text-white px-3.5 py-2.5 rounded-xl shadow-xl text-xs space-y-1 border border-slate-700/50">
+        <div className="font-bold text-slate-200 border-b border-slate-700/60 pb-1 flex items-center justify-between gap-4">
+          <span>{label} {data.day ? `(${data.day})` : ''}</span>
+          {data.isToday && <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-bold">Live</span>}
+        </div>
+        {data.energy !== null && data.energy !== undefined && (
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-slate-400">Yield:</span>
+            <span className="font-bold text-emerald-400">{data.energy} kWh</span>
+          </div>
+        )}
+        {data.power !== null && data.power !== undefined && (
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-slate-400">Power:</span>
+            <span className="font-bold text-blue-400">{data.power} kW</span>
+          </div>
+        )}
+        {data.specificYield && (
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-slate-400">Specific Yield:</span>
+            <span className="font-medium text-amber-300">{data.specificYield} kWh/kWp</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+  return null;
+}
 
 export default function DeviceDashboard() {
   const { serial } = useParams();
@@ -22,9 +67,13 @@ export default function DeviceDashboard() {
   const [isOnline, setIsOnline] = useState(true);
   const [viewMode, setViewMode] = useState('combined'); // 'combined' | '0' | '1' ...
   
-  // Historical Analytics Tab
-  const [historyPeriod, setHistoryPeriod] = useState('today'); // 'today' | 'yesterday' | '7days' | '30days'
-  const [historicalData, setHistoricalData] = useState([]);
+  // 10-Day Historical Analytics State
+  const [historyPeriod, setHistoryPeriod] = useState('10days'); // 'today' | 'yesterday' | '7days' | '10days' | '30days'
+  const [historyMetric, setHistoryMetric] = useState('energy'); // 'energy' | 'power'
+  const [historicalData, setHistoricalData] = useState(() => getHistoricalAnalytics(serial, '10days', device?.capacity_kw || 50));
+  const [tenDaySummaries, setTenDaySummaries] = useState([]);
+  const [csvExporting, setCsvExporting] = useState(false);
+  const [csvSuccess, setCsvSuccess] = useState(false);
 
   // Edit Site Modal
   const [showEditModal, setShowEditModal] = useState(false);
@@ -42,8 +91,6 @@ export default function DeviceDashboard() {
       setIsOnline(true);
     }
     
-    setHistoricalData(getHistoricalAnalytics(serial, historyPeriod, dev?.capacity_kw || 50));
-
     const mqttHost = localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt';
     const mqttPrefix = localStorage.getItem('oes_mqtt_prefix') || 'oes';
 
@@ -52,7 +99,6 @@ export default function DeviceDashboard() {
 
     client.on('connect', () => {
       console.log('DeviceDashboard: Connected to MQTT for ' + serial);
-      // Wildcard subscriptions to guarantee we catch any topic format
       client.subscribe(mqttPrefix + '/#');
       client.subscribe('oes/#');
     });
@@ -74,7 +120,6 @@ export default function DeviceDashboard() {
           type = 'telemetry';
         }
 
-        // Case-insensitive match on serial
         if (!msgSerial || msgSerial.toLowerCase() !== serial.toLowerCase()) return;
 
         const data = JSON.parse(message.toString());
@@ -94,7 +139,6 @@ export default function DeviceDashboard() {
       }
     });
 
-    // Heartbeat check
     const timer = setInterval(() => {
       setLastSeen(prev => {
         if (Date.now() - prev > 45000) {
@@ -110,10 +154,23 @@ export default function DeviceDashboard() {
     };
   }, [serial]);
 
-  // Update history whenever period changes
+  // Load IndexedDB 10-day history whenever period or serial changes
   useEffect(() => {
-    setHistoricalData(getHistoricalAnalytics(serial, historyPeriod, device.capacity_kw || 50));
-  }, [historyPeriod, serial, device.capacity_kw]);
+    let isMounted = true;
+    async function loadHistory() {
+      const cap = device?.capacity_kw || 50;
+      const data = await getHistoricalAnalyticsDB(serial, historyPeriod, cap);
+      if (isMounted && data && data.length > 0) {
+        setHistoricalData(data);
+      }
+      const summaries = await get10DayDailySummaries(serial, cap);
+      if (isMounted && summaries && summaries.length > 0) {
+        setTenDaySummaries(summaries);
+      }
+    }
+    loadHistory();
+    return () => { isMounted = false; };
+  }, [historyPeriod, serial, device?.capacity_kw]);
 
   const handleSaveSiteDetails = () => {
     const updated = upsertDevice({ ...editForm, _userEdit: true });
@@ -122,7 +179,6 @@ export default function DeviceDashboard() {
   };
 
   const handleDownloadPdf = () => {
-    // Use freshest data: current live state or last cached payload
     const pdfData = liveData || getLastLiveData(serial);
     if (pdfData && pdfData.inv) {
       pdfData.inv.forEach((inv, i) => {
@@ -138,7 +194,20 @@ export default function DeviceDashboard() {
     });
   };
 
-  // Zero-out when device is offline - never show stale cached values
+  const handleExportCsv = async () => {
+    try {
+      setCsvExporting(true);
+      await export10DayCSV(serial, device);
+      setCsvSuccess(true);
+      setTimeout(() => setCsvSuccess(false), 4000);
+    } catch (err) {
+      console.error('Error exporting CSV:', err);
+    } finally {
+      setCsvExporting(false);
+    }
+  };
+
+  // Zero-out when device is offline
   const ZERO_DATA = {
     status: 0, pv_v: 0, pv_a: 0, pv_w: 0,
     ac_v: 0, ac_a: 0, ac_w: 0, freq: 0,
@@ -204,14 +273,8 @@ export default function DeviceDashboard() {
     }
   });
 
-  // Default demo strings if none configured in data
-  if (allStrings.length === 0) {
-    // Show empty data if no real data is available
-  }
-
   const PIE_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6', '#F43F5E', '#6366F1'];
 
-  // Status computation
   const isGenerating = parseFloat(ac_w) > 0 || currentInv?.status === 2 || currentInv?.status === '2' || currentInv?.status === 'online';
   const statusLabel = isGenerating ? 'Generating' : (currentInv?.status === 3 ? 'Fault' : (isOnline ? 'Standby' : 'Offline'));
   const statusColor = isGenerating ? 'bg-oes-green text-oes-blue' : (currentInv?.status === 3 ? 'bg-red-500 text-white' : 'bg-slate-700 text-white');
@@ -224,7 +287,7 @@ export default function DeviceDashboard() {
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-800 pb-20">
       
-      {/* 1. TOP NAV & CONTROLS (App Aesthetic) */}
+      {/* 1. TOP NAV & CONTROLS */}
       <div className="bg-oes-blue text-white pt-6 md:pt-10 pb-6 md:pb-8 px-4 md:px-12 shadow-lg rounded-b-3xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-20 -mt-20 pointer-events-none"></div>
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
@@ -243,16 +306,33 @@ export default function DeviceDashboard() {
             </p>
           </div>
           
-          <div className="flex items-center gap-2 md:gap-3 w-full md:w-auto mt-2 md:mt-0">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3 w-full md:w-auto mt-2 md:mt-0">
             <button 
               onClick={() => { setEditForm({ ...device }); setShowEditModal(true); }}
-              className="flex-1 md:flex-none flex items-center justify-center gap-1.5 md:gap-2 p-2.5 md:p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-colors text-white font-semibold text-xs md:text-sm"
+              className="flex items-center justify-center gap-1.5 p-2.5 md:p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-colors text-white font-semibold text-xs md:text-sm"
             >
               <Edit className="w-4 h-4" /> Edit Site
             </button>
+            
+            {/* Export 10-Day CSV Button */}
+            <button 
+              onClick={handleExportCsv}
+              disabled={csvExporting}
+              className={`flex items-center justify-center gap-1.5 px-3.5 md:px-4 py-2.5 md:py-3 rounded-xl transition-all font-bold text-xs md:text-sm shadow-sm ${
+                csvSuccess 
+                  ? 'bg-emerald-500 text-white' 
+                  : 'bg-white/15 hover:bg-white/25 text-white border border-white/20'
+              }`}
+              title="Download 10 days of raw timestamped readings as CSV"
+            >
+              {csvSuccess ? <Check className="w-4 h-4" /> : <FileSpreadsheet className="w-4 h-4 text-oes-green" />}
+              <span>{csvSuccess ? 'CSV Exported!' : (csvExporting ? 'Exporting...' : 'Export 10-Day CSV')}</span>
+            </button>
+
+            {/* Generate PDF Button */}
             <button 
               onClick={handleDownloadPdf}
-              className="flex-1 md:flex-none flex items-center justify-center gap-1.5 md:gap-2 px-4 md:px-5 py-2.5 md:py-3 bg-white text-oes-blue hover:bg-slate-50 rounded-xl transition-all font-bold text-xs md:text-sm shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:shadow-[0_6px_16px_rgba(0,0,0,0.15)] hover:-translate-y-0.5"
+              className="flex items-center justify-center gap-1.5 px-4 md:px-5 py-2.5 md:py-3 bg-white text-oes-blue hover:bg-slate-50 rounded-xl transition-all font-bold text-xs md:text-sm shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:shadow-[0_6px_16px_rgba(0,0,0,0.15)] hover:-translate-y-0.5"
             >
               <Download className="w-4 h-4" /> Generate PDF
             </button>
@@ -283,7 +363,7 @@ export default function DeviceDashboard() {
           </div>
         )}
 
-        {/* HERO SOLAR GENERATION CARD (App Aesthetic) */}
+        {/* HERO SOLAR GENERATION CARD */}
         <div className="bg-white rounded-3xl p-5 md:p-8 shadow-[0_8px_30px_-10px_rgba(0,0,0,0.05)] border border-slate-100 relative overflow-hidden mx-2 md:mx-0 group hover:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.08)] transition-shadow">
           <div className="absolute top-0 right-0 w-32 h-32 md:w-48 md:h-48 bg-gradient-to-bl from-oes-green/10 to-transparent rounded-bl-full -mr-10 -mt-10 pointer-events-none"></div>
           
@@ -296,10 +376,13 @@ export default function DeviceDashboard() {
                 <span className={`px-2.5 py-1 rounded-md text-[9px] md:text-[10px] font-black uppercase tracking-wider ${isOnline ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
                   {isOnline ? 'ONLINE' : 'OFFLINE'}
                 </span>
+                <span className="text-[10px] text-slate-400 font-medium ml-2">
+                  Last telemetry: {heartbeatText}
+                </span>
               </div>
               
               <div className="text-xs md:text-sm font-bold text-slate-400 uppercase tracking-widest mt-2 md:mt-4">
-                {isCombined ? 'Total Active Output' : `Current Output`}
+                {isCombined ? 'Total Active Output' : 'Current Output'}
               </div>
               <div className="flex items-baseline gap-1.5 md:gap-2 mt-1">
                 <span className="text-5xl md:text-7xl font-black text-slate-800 tracking-tighter">{powerKW}</span>
@@ -316,7 +399,8 @@ export default function DeviceDashboard() {
             </div>
           </div>
         </div>
-        {/* 4. CORE KPI METRICS (App Aesthetic) */}
+
+        {/* 4. CORE KPI METRICS */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mx-2 md:mx-0">
           <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:-translate-y-1 transition-transform">
             <div className="bg-gradient-to-br from-oes-green/20 to-oes-green/5 w-10 h-10 rounded-xl flex items-center justify-center text-oes-green-dark mb-3"><Zap className="w-5 h-5" /></div>
@@ -388,7 +472,160 @@ export default function DeviceDashboard() {
           </div>
         </div>
 
-        {/* 6. MPPT & STRING CONTRIBUTION (Web specific, restyled) */}
+        {/* 6. HISTORICAL GENERATION & 10-DAY ANALYTICS CARD */}
+        <div className="bg-white rounded-3xl p-5 md:p-8 border border-slate-100 shadow-[0_8px_30px_-10px_rgba(0,0,0,0.05)] mx-2 md:mx-0 space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <div className="bg-oes-blue/10 text-oes-blue p-2.5 rounded-2xl">
+                  <CalendarDays className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2">
+                    Generation History & 10-Day Storage
+                    <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-md border border-emerald-200/50 flex items-center gap-1">
+                      <HardDrive className="w-3 h-3" /> 10-Day IndexedDB
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium mt-0.5">
+                    Real telemetry readings saved for 10 days in browser • Automatic rolling purge
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Metric Mode & Period Controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="bg-slate-100 p-1 rounded-xl flex items-center text-xs font-bold">
+                <button
+                  onClick={() => setHistoryMetric('energy')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${historyMetric === 'energy' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  Yield (kWh)
+                </button>
+                <button
+                  onClick={() => setHistoryMetric('power')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${historyMetric === 'power' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  Power (kW)
+                </button>
+              </div>
+
+              <div className="bg-slate-100 p-1 rounded-xl flex items-center text-xs font-bold">
+                {[
+                  { id: 'today', label: 'Today' },
+                  { id: 'yesterday', label: 'Yesterday' },
+                  { id: '7days', label: '7 Days' },
+                  { id: '10days', label: '10 Days' },
+                  { id: '30days', label: '30 Days' }
+                ].map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => setHistoryPeriod(p.id)}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${
+                      historyPeriod === p.id 
+                        ? 'bg-oes-blue text-white shadow-sm' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Chart */}
+          <div className="w-full h-64 md:h-72 pt-2">
+            <ResponsiveContainer width="100%" height="100%">
+              {historyMetric === 'energy' ? (
+                <BarChart data={historicalData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="oesEnergyGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10B981" stopOpacity={0.9} />
+                      <stop offset="100%" stopColor="#059669" stopOpacity={0.65} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                  <XAxis dataKey="time" stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} unit=" kWh" />
+                  <Tooltip content={<CustomHistoryTooltip />} />
+                  <Bar dataKey="energy" fill="url(#oesEnergyGrad)" radius={[8, 8, 0, 0]} maxBarSize={45} />
+                </BarChart>
+              ) : (
+                <AreaChart data={historicalData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="oesPowerGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.45} />
+                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                  <XAxis dataKey="time" stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} unit=" kW" />
+                  <Tooltip content={<CustomHistoryTooltip />} />
+                  <Area type="monotone" dataKey="power" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#oesPowerGrad)" />
+                </AreaChart>
+              )}
+            </ResponsiveContainer>
+          </div>
+
+          {/* 10-Day Yield Audit Table */}
+          {tenDaySummaries.length > 0 && (
+            <div className="pt-4 border-t border-slate-100">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <History className="w-4 h-4 text-oes-blue" /> 10-Day Plant Reading Log
+                </h4>
+                <button
+                  onClick={handleExportCsv}
+                  className="text-xs font-bold text-oes-blue hover:text-blue-700 flex items-center gap-1 self-start sm:self-auto"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Download Complete 10-Day CSV Log
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase">
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">Daily Yield</th>
+                      <th className="py-2.5 px-3">Peak Power</th>
+                      <th className="py-2.5 px-3">Specific Yield</th>
+                      <th className="py-2.5 px-3">Avg Temp</th>
+                      <th className="py-2.5 px-3">Performance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 font-medium">
+                    {tenDaySummaries.map((day, idx) => (
+                      <tr key={idx} className={`hover:bg-slate-50/80 transition-colors ${day.isToday ? 'bg-emerald-50/40 font-bold' : ''}`}>
+                        <td className="py-2.5 px-3 flex items-center gap-2">
+                          <span className="text-slate-800">{day.formattedDate}</span>
+                          <span className="text-[10px] text-slate-400 font-normal">({day.dayName})</span>
+                          {day.isToday && (
+                            <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black">Today</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 font-bold text-slate-800">{day.totalKwh} kWh</td>
+                        <td className="py-2.5 px-3 text-slate-700">{day.peakKw} kW</td>
+                        <td className="py-2.5 px-3 text-slate-600">{day.specificYield} kWh/kWp</td>
+                        <td className="py-2.5 px-3 text-slate-500">{day.avgTemp} °C</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${day.status === 'Optimal' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
+                            {day.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 7. MPPT & STRING CONTRIBUTION */}
         {allStrings.length > 0 && (
           <div className="bg-white rounded-2xl p-6 md:p-8 border border-slate-100 shadow-sm space-y-6 mx-2 md:mx-0">
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">

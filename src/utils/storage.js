@@ -1,6 +1,16 @@
 /**
  * OES Solar Cloud - Multi-Device Registry & Historical Data Storage
+ * Integrated with 10-Day IndexedDB Telemetry Storage Engine
  */
+
+import { 
+  recordReading as recordReadingDB, 
+  getHistoricalAnalyticsDB, 
+  get10DayDailySummaries, 
+  export10DayCSV 
+} from './telemetryDB';
+
+export { getHistoricalAnalyticsDB, get10DayDailySummaries, export10DayCSV };
 
 const DEVICES_KEY = 'oes_cloud_devices_v4';
 const TELEMETRY_KEY_PREFIX = 'oes_telemetry_';
@@ -129,6 +139,11 @@ export function getLastLiveData(serial) {
 export function recordDeviceTelemetry(serial, liveData) {
   try {
     if (!serial || !liveData) return;
+
+    // 1. Record into 10-Day Persistent IndexedDB
+    recordReadingDB(serial, liveData);
+
+    // 2. Keep fast local storage buffer (up to 200 samples)
     const key = TELEMETRY_KEY_PREFIX + serial;
     const raw = localStorage.getItem(key);
     let history = raw ? JSON.parse(raw) : [];
@@ -156,7 +171,6 @@ export function recordDeviceTelemetry(serial, liveData) {
       temp: liveData.temp || (liveData.inv && liveData.inv[0] ? liveData.inv[0].temp : 45)
     });
 
-    // Keep max 200 recent samples
     if (history.length > 200) history.shift();
     localStorage.setItem(key, JSON.stringify(history));
   } catch (e) {
@@ -165,24 +179,23 @@ export function recordDeviceTelemetry(serial, liveData) {
 }
 
 /**
- * Generate rich historical generation curves (Today, Yesterday, 7 Days, 30 Days)
+ * Synchronous initial fallback while IndexedDB loads
  */
-export function getHistoricalAnalytics(serial, period = 'today', capacityKw = 50) {
+export function getHistoricalAnalytics(serial, period = '10days', capacityKw = 50) {
   const now = new Date();
   
-  if (period === 'today') {
+  if (period === 'today' || period === 'yesterday') {
     const hours = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
     const currentHour = now.getHours();
     
     return hours.map((h, idx) => {
       const hourNum = 6 + idx;
-      if (hourNum > currentHour) {
+      if (period === 'today' && hourNum > currentHour) {
         return { time: h, power: null, energy: null };
       }
       const distanceFromNoon = Math.abs(12.5 - hourNum);
       const maxPower = capacityKw * 0.85;
       let simulatedPower = Math.max(0, maxPower - (distanceFromNoon * distanceFromNoon * (capacityKw * 0.05)));
-      simulatedPower = simulatedPower * (0.95 + Math.random() * 0.1);
       return { 
         time: h, 
         power: Number(simulatedPower.toFixed(2)), 
@@ -191,23 +204,16 @@ export function getHistoricalAnalytics(serial, period = 'today', capacityKw = 50
     });
   }
 
-  if (period === 'yesterday') {
-    const hours = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-    return hours.map((h, idx) => {
-      const hourNum = 6 + idx;
-      const distanceFromNoon = Math.abs(12.5 - hourNum);
-      const maxPower = capacityKw * 0.82;
-      let simulatedPower = Math.max(0, maxPower - (distanceFromNoon * distanceFromNoon * (capacityKw * 0.05)));
-      simulatedPower = simulatedPower * (0.93 + Math.random() * 0.09);
-      return { time: h, power: Number(simulatedPower.toFixed(2)), energy: Number((simulatedPower * 0.95).toFixed(2)) };
-    });
-  }
-
-  if (period === '7days') {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days.map(day => {
-      const energy = Number((capacityKw * (3.5 + Math.random() * 2.5)).toFixed(1));
-      return { time: day, energy, power: Number((energy / 8).toFixed(2)) };
+  if (period === '10days' || period === '7days') {
+    const count = period === '10days' ? 10 : 7;
+    return Array.from({ length: count }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (count - 1 - i));
+      const label = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
+      const day = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const energy = Number((capacityKw * (3.5 + ((d.getDate() % 4) * 0.35))).toFixed(1));
+      const power = Number((capacityKw * (0.72 + ((d.getDate() % 3) * 0.04))).toFixed(2));
+      return { time: label, day, energy, power, specificYield: Number((energy / capacityKw).toFixed(2)) };
     });
   }
 
