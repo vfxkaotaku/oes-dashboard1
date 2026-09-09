@@ -6,6 +6,40 @@ import DeviceDashboard from './pages/DeviceDashboard';
 import { isFirebaseConfigured, getFirebaseConfig, saveFirebaseConfig } from './utils/storage';
 import './index.css';
 
+// Helper to parse both pure JSON and Firebase JS snippet (const firebaseConfig = { ... })
+function parseFirebaseInput(raw) {
+  if (!raw || !raw.trim()) return null;
+  // 1. Try direct JSON.parse
+  try {
+    return JSON.parse(raw);
+  } catch (e) {}
+
+  // 2. Extract object {...}
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (match) {
+    const objectStr = match[0];
+    try {
+      return JSON.parse(objectStr);
+    } catch (e) {}
+
+    // 3. Extract key-value pairs via regex (handles unquoted JS keys and comments)
+    const config = {};
+    const keys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId', 'measurementId'];
+    keys.forEach(k => {
+      const reg = new RegExp(`['"]?${k}['"]?\\s*:\\s*['"]([^'"]+)['"]`, 'i');
+      const m = objectStr.match(reg);
+      if (m && m[1]) {
+        config[k] = m[1];
+      }
+    });
+
+    if (config.apiKey && config.projectId) {
+      return config;
+    }
+  }
+  return null;
+}
+
 function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [mqttHost, setMqttHost] = useState(localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt');
@@ -22,13 +56,12 @@ function App() {
     localStorage.setItem('oes_mqtt_prefix', mqttPrefix);
 
     if (firebaseConfigStr.trim()) {
-      try {
-        const parsed = JSON.parse(firebaseConfigStr);
-        saveFirebaseConfig(parsed);
-      } catch (e) {
-        alert('Invalid Firebase JSON format. Please paste valid JSON configuration.');
+      const parsed = parseFirebaseInput(firebaseConfigStr);
+      if (!parsed || !parsed.apiKey || !parsed.projectId) {
+        alert('Could not find apiKey or projectId in your Firebase configuration. Please check the snippet.');
         return;
       }
+      saveFirebaseConfig(parsed);
     } else {
       saveFirebaseConfig(null);
     }
