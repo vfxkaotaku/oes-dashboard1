@@ -4,7 +4,7 @@ import {
   ArrowLeft, Download, Sun, Zap, Layers, Activity, 
   MapPin, Clock, Edit, CheckCircle2, AlertTriangle, ShieldCheck, 
   Calendar, TrendingUp, BarChart3, Database, RefreshCw, X, ShieldAlert, Cpu,
-  FileSpreadsheet, CalendarDays, History, Sparkles, Check, HardDrive
+  FileSpreadsheet, CalendarDays, History, Cloud, Sparkles, Check, HardDrive
 } from 'lucide-react';
 import mqtt from 'mqtt';
 import { 
@@ -20,7 +20,8 @@ import {
   saveLastLiveData,
   getHistoricalAnalyticsDB,
   get10DayDailySummaries,
-  export10DayCSV
+  export10DayCSV,
+  isFirebaseConfigured
 } from '../utils/storage';
 import { generateSolarPdfReport } from '../utils/pdfGenerator';
 
@@ -84,6 +85,7 @@ export default function DeviceDashboard() {
 
   // Edit Site Modal
   const [showEditModal, setShowEditModal] = useState(false);
+  const isCloudSynced = isFirebaseConfigured();
   const [editForm, setEditForm] = useState({ ...device });
 
   // 1. MQTT Connection & Live Streaming
@@ -203,7 +205,8 @@ export default function DeviceDashboard() {
   const handleExportCsv = async () => {
     try {
       setCsvExporting(true);
-      await export10DayCSV(serial, device);
+      await export10DayCSV,
+  isFirebaseConfigured(serial, device);
       setCsvSuccess(true);
       setTimeout(() => setCsvSuccess(false), 4000);
     } catch (err) {
@@ -491,12 +494,20 @@ export default function DeviceDashboard() {
                 <div>
                   <h3 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2">
                     Generation History & 10-Day Storage
-                    <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-md border border-emerald-200/50 flex items-center gap-1">
-                      <HardDrive className="w-3 h-3" /> 10-Day IndexedDB
-                    </span>
+                    {isCloudSynced ? (
+                      <span className="bg-amber-50 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-md border border-amber-200/50 flex items-center gap-1">
+                        <Cloud className="w-3 h-3 text-amber-600" /> Firebase Cloud
+                      </span>
+                    ) : (
+                      <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-md border border-emerald-200/50 flex items-center gap-1">
+                        <HardDrive className="w-3 h-3" /> 10-Day Local Store
+                      </span>
+                    )}
                   </h3>
                   <p className="text-xs text-slate-400 font-medium mt-0.5">
-                    Real telemetry readings saved for 10 days in browser • Automatic rolling purge
+                    {isCloudSynced
+                      ? 'Daily peak generation synced to Firebase cloud • Accessible from any device 24/7'
+                      : 'Daily peak generation saved in browser • Connect Firebase in Settings to sync across all devices'}
                   </p>
                 </div>
               </div>

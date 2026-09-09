@@ -1,17 +1,29 @@
 /**
  * OES Solar Cloud - Multi-Device Registry & Historical Data Storage
- * Integrated with 10-Day IndexedDB Telemetry Storage Engine
- * NO DEMO / SIMULATED READINGS
+ * Integrated with 10-Day IndexedDB & Firebase Firestore Cloud Storage
  */
 
 import { 
   recordReading as recordReadingDB, 
-  getHistoricalAnalyticsDB, 
-  get10DayDailySummaries, 
+  getHistoricalAnalyticsDB as getHistoricalAnalyticsIndexedDB, 
+  get10DayDailySummaries as get10DayDailySummariesIndexedDB, 
   export10DayCSV 
 } from './telemetryDB';
 
-export { getHistoricalAnalyticsDB, get10DayDailySummaries, export10DayCSV };
+import {
+  recordDailyPeakFirestore,
+  get10DayPeaksFirestore,
+  isFirebaseConfigured,
+  getFirebaseConfig,
+  saveFirebaseConfig
+} from './firebase';
+
+export { 
+  export10DayCSV, 
+  isFirebaseConfigured, 
+  getFirebaseConfig, 
+  saveFirebaseConfig 
+};
 
 const DEVICES_KEY = 'oes_cloud_devices_v4';
 const TELEMETRY_KEY_PREFIX = 'oes_telemetry_';
@@ -125,14 +137,25 @@ export function getLastLiveData(serial) {
   } catch (e) { return null; }
 }
 
+/**
+ * Record live telemetry:
+ * 1. Saves to local browser IndexedDB
+ * 2. Saves to Firebase Firestore (if configured)
+ * 3. Keeps latest 200 in fast localStorage
+ */
 export function recordDeviceTelemetry(serial, liveData) {
   try {
     if (!serial || !liveData) return;
 
-    // 1. Record into 10-Day Persistent IndexedDB
+    // 1. Local IndexedDB (10-day peak store)
     recordReadingDB(serial, liveData);
 
-    // 2. Keep fast local storage buffer (up to 200 samples)
+    // 2. Cloud Firebase Firestore (10-day peak store across all devices)
+    if (isFirebaseConfigured()) {
+      recordDailyPeakFirestore(serial, liveData);
+    }
+
+    // 3. Fast localStorage ring buffer
     const key = TELEMETRY_KEY_PREFIX + serial;
     const raw = localStorage.getItem(key);
     let history = raw ? JSON.parse(raw) : [];
@@ -166,22 +189,101 @@ export function recordDeviceTelemetry(serial, liveData) {
 }
 
 /**
- * Initial empty template - no fake curves or random numbers
+ * Unified 10-day daily summaries:
+ * Fetches from Firebase Firestore if configured; falls back to local IndexedDB
+ */
+export async function get10DayDailySummaries(serial, capacityKw = 50) {
+  if (isFirebaseConfigured()) {
+    const cloudSummaries = await get10DayPeaksFirestore(serial, capacityKw);
+    if (cloudSummaries && cloudSummaries.length > 0 && cloudSummaries.some(s => s.hasData)) {
+      return cloudSummaries;
+    }
+  }
+  return await get10DayDailySummariesIndexedDB(serial, capacityKw);
+}
+
+/**
+ * Unified historical analytics for chart:
+ * Bridges Firestore and IndexedDB
+ */
+export async function getHistoricalAnalyticsDB(serial, period = '10days', capacityKw = 50) {
+  const summaries = await get10DayDailySummaries(serial, capacityKw);
+
+  if (period === '10days') {
+    return summaries.map(s => ({
+      time: s.formattedDate,
+      fullDate: s.dateStr,
+      day: s.dayName,
+      energy: s.totalKwh,
+      power: s.peakKw,
+      peakTime: s.peakTime,
+      specificYield: s.specificYield,
+      isToday: s.isToday,
+      hasData: s.hasData
+    }));
+  }
+
+  if (period === '7days') {
+    return summaries.slice(3).map(s => ({
+      time: s.dayName + ' ' + s.formattedDate,
+      energy: s.totalKwh,
+      power: s.peakKw,
+      hasData: s.hasData
+    }));
+  }
+
+  if (period === 'today') {
+    const todaySummary = summaries[summaries.length - 1];
+    return [
+      { time: 'Peak Power', power: todaySummary?.peakKw || 0, energy: null, day: todaySummary?.peakTime || '' },
+      { time: 'Today Yield', power: null, energy: todaySummary?.totalKwh || 0, day: 'Total' }
+    ];
+  }
+
+  if (period === 'yesterday') {
+    const yestSummary = summaries[summaries.length - 2];
+    return [
+      { time: 'Peak Power', power: yestSummary?.peakKw || 0, energy: null, day: yestSummary?.peakTime || '' },
+      { time: 'Daily Yield', power: null, energy: yestSummary?.totalKwh || 0, day: 'Total' }
+    ];
+  }
+
+  if (period === '30days') {
+    const map = {};
+    summaries.forEach(s => { map[s.dateStr] = s; });
+
+    return Array.from({ length: 30 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (29 - i));
+      const dateStr = d.toISOString().split('T')[0];
+      const label = d.getDate() + '/' + (d.getMonth() + 1);
+
+      if (map[dateStr]) {
+        return { 
+          time: label, 
+          energy: map[dateStr].totalKwh, 
+          power: map[dateStr].peakKw,
+          hasData: map[dateStr].hasData
+        };
+      }
+      return { time: label, energy: 0, power: 0, hasData: false };
+    });
+  }
+
+  return [];
+}
+
+/**
+ * Initial empty template - zero fake curves
  */
 export function getHistoricalAnalytics(serial, period = '10days', capacityKw = 50) {
   const now = new Date();
   
   if (period === 'today' || period === 'yesterday') {
-    const hours = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-    const currentHour = now.getHours();
-    
-    return hours.map((h, idx) => {
-      const hourNum = 6 + idx;
-      if (period === 'today' && hourNum > currentHour) {
-        return { time: h, power: null, energy: null };
-      }
-      return { time: h, power: 0, energy: 0 };
-    });
+    return [
+      { time: 'Peak Power', power: 0, energy: null },
+      { time: 'Yield', power: null, energy: 0 }
+    ];
   }
 
   if (period === '10days' || period === '7days') {
@@ -191,7 +293,7 @@ export function getHistoricalAnalytics(serial, period = '10days', capacityKw = 5
       d.setDate(d.getDate() - (count - 1 - i));
       const label = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
       const day = d.toLocaleDateString('en-US', { weekday: 'short' });
-      return { time: label, day, energy: 0, power: 0, specificYield: 0 };
+      return { time: label, day, energy: 0, power: 0, specificYield: 0, hasData: false };
     });
   }
 
@@ -200,7 +302,7 @@ export function getHistoricalAnalytics(serial, period = '10days', capacityKw = 5
       const d = new Date(); 
       d.setDate(d.getDate() - (29 - i));
       const label = d.getDate() + '/' + (d.getMonth() + 1);
-      return { time: label, energy: 0, power: 0 };
+      return { time: label, energy: 0, power: 0, hasData: false };
     });
   }
 

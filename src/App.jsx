@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { HashRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { Sun, Activity, ShieldCheck, Layers, HelpCircle, Settings, X } from 'lucide-react';
+import { Sun, Activity, ShieldCheck, Layers, HelpCircle, Settings, X, Cloud, HardDrive, CheckCircle2 } from 'lucide-react';
 import FleetView from './pages/FleetView';
 import DeviceDashboard from './pages/DeviceDashboard';
+import { isFirebaseConfigured, getFirebaseConfig, saveFirebaseConfig } from './utils/storage';
 import './index.css';
 
 function App() {
@@ -10,12 +11,33 @@ function App() {
   const [mqttHost, setMqttHost] = useState(localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt');
   const [mqttPrefix, setMqttPrefix] = useState(localStorage.getItem('oes_mqtt_prefix') || 'oes');
 
+  // Firebase Config State
+  const [firebaseConfigStr, setFirebaseConfigStr] = useState(() => {
+    const cfg = getFirebaseConfig();
+    return cfg ? JSON.stringify(cfg, null, 2) : '';
+  });
+
   const handleSaveSettings = () => {
     localStorage.setItem('oes_mqtt_host', mqttHost);
     localStorage.setItem('oes_mqtt_prefix', mqttPrefix);
+
+    if (firebaseConfigStr.trim()) {
+      try {
+        const parsed = JSON.parse(firebaseConfigStr);
+        saveFirebaseConfig(parsed);
+      } catch (e) {
+        alert('Invalid Firebase JSON format. Please paste valid JSON configuration.');
+        return;
+      }
+    } else {
+      saveFirebaseConfig(null);
+    }
+
     setShowSettings(false);
-    window.location.reload(); // Reload to reconnect MQTT
+    window.location.reload();
   };
+
+  const isCloudActive = isFirebaseConfigured();
 
   return (
     <Router>
@@ -46,6 +68,18 @@ function App() {
                 <span className="w-2 h-2 rounded-full bg-oes-green animate-pulse"></span>
                 <span>MQTT Real-time Ingestion</span>
               </div>
+
+              {isCloudActive ? (
+                <div className="hidden sm:flex items-center gap-1.5 bg-amber-400/20 text-amber-200 px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-400/30">
+                  <Cloud className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Cloud Synced</span>
+                </div>
+              ) : (
+                <div className="hidden sm:flex items-center gap-1.5 bg-white/10 text-white/80 px-3 py-1.5 rounded-xl text-xs font-bold border border-white/10">
+                  <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Local Store</span>
+                </div>
+              )}
               
               <Link 
                 to="/" 
@@ -68,48 +102,87 @@ function App() {
         {/* Global Settings Modal */}
         {showSettings && (
           <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-fade-in-up">
+            <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-fade-in-up border border-slate-100 max-h-[90vh] flex flex-col">
               <div className="flex justify-between items-center p-5 border-b border-slate-100">
-                <div className="font-bold text-lg text-slate-800">Dashboard Settings</div>
-                <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
-                  <X size={20} />
+                <div className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                  <Settings className="w-5 h-5 text-oes-blue" /> Dashboard Settings
+                </div>
+                <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600 bg-slate-50 p-2 rounded-full">
+                  <X size={18} />
                 </button>
               </div>
-              <div className="p-5 space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">MQTT Broker URL (WebSocket)</label>
-                  <input 
-                    type="text" 
-                    value={mqttHost}
-                    onChange={(e) => setMqttHost(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-oes-blue/20 focus:border-oes-blue transition-all"
-                    placeholder="wss://broker.emqx.io:8084/mqtt"
-                  />
-                  <p className="text-[10px] text-slate-400">Must be a WebSocket (wss://) URL if running in browser.</p>
+
+              <div className="p-5 space-y-5 overflow-y-auto flex-1 text-xs">
+                
+                {/* 1. MQTT Section */}
+                <div className="space-y-3">
+                  <h4 className="font-bold text-slate-700 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <Activity className="w-4 h-4 text-oes-blue" /> Live MQTT Stream
+                  </h4>
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">MQTT Broker URL (WebSocket)</label>
+                    <input 
+                      type="text" 
+                      value={mqttHost}
+                      onChange={(e) => setMqttHost(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-oes-blue font-mono"
+                      placeholder="wss://broker.emqx.io:8084/mqtt"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">MQTT Topic Prefix</label>
+                    <input 
+                      type="text" 
+                      value={mqttPrefix}
+                      onChange={(e) => setMqttPrefix(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-oes-blue font-mono"
+                      placeholder="oes"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">MQTT Topic Prefix</label>
-                  <input 
-                    type="text" 
-                    value={mqttPrefix}
-                    onChange={(e) => setMqttPrefix(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-oes-blue/20 focus:border-oes-blue transition-all"
-                    placeholder="oes"
-                  />
+
+                {/* 2. Firebase Cloud Database Section */}
+                <div className="space-y-3 pt-3 border-t border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-slate-700 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                      <Cloud className="w-4 h-4 text-amber-500" /> Firebase Cloud Storage (Firestore)
+                    </h4>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isCloudActive ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-500'}`}>
+                      {isCloudActive ? 'Cloud Active' : 'Local Only'}
+                    </span>
+                  </div>
+                  
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    Paste your free Google Firebase config JSON below to store 10-day daily peaks in the cloud so all users and devices can view the same history 24/7.
+                  </p>
+
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Firebase Config (JSON snippet)</label>
+                    <textarea 
+                      rows={5}
+                      value={firebaseConfigStr}
+                      onChange={(e) => setFirebaseConfigStr(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-mono focus:outline-none focus:border-oes-blue leading-tight"
+                      placeholder={`{\n  "apiKey": "AIzaSy...",\n  "authDomain": "your-project.firebaseapp.com",\n  "projectId": "your-project-id",\n  "storageBucket": "...",\n  "appId": "..."\n}`}
+                    />
+                    <p className="text-[10px] text-slate-400">Leave blank to use browser's built-in local IndexedDB storage.</p>
+                  </div>
                 </div>
+
               </div>
-              <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2.5">
                 <button 
                   onClick={() => setShowSettings(false)}
-                  className="px-5 py-2.5 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button 
                   onClick={handleSaveSettings}
-                  className="px-5 py-2.5 text-sm font-bold text-white bg-oes-blue rounded-xl hover:bg-[#00284A] transition-colors shadow-sm"
+                  className="px-5 py-2 text-xs font-bold text-white bg-oes-blue rounded-xl hover:bg-[#00284A] transition-colors shadow-sm"
                 >
-                  Save & Reload
+                  Save & Apply
                 </button>
               </div>
             </div>
