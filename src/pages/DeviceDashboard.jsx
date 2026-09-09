@@ -4,7 +4,7 @@ import {
   ArrowLeft, Download, Sun, Zap, Layers, Activity, 
   MapPin, Clock, Edit, CheckCircle2, AlertTriangle, ShieldCheck, 
   Calendar, TrendingUp, BarChart3, Database, RefreshCw, X, ShieldAlert, Cpu,
-  FileSpreadsheet, CalendarDays, History, Cloud, Sparkles, Check, HardDrive
+  FileSpreadsheet, CalendarDays, History, Sparkles, Check, HardDrive, Cloud
 } from 'lucide-react';
 import mqtt from 'mqtt';
 import { 
@@ -28,12 +28,12 @@ import { generateSolarPdfReport } from '../utils/pdfGenerator';
 function CustomHistoryTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
-    const hasData = (data.energy > 0) || (data.power > 0) || (data.samplesCount > 0);
+    const hasData = (data.energy > 0) || (data.power > 0) || (data.hasData);
     return (
-      <div className="bg-slate-900 text-white px-3.5 py-2.5 rounded-xl shadow-xl text-xs space-y-1 border border-slate-700/50">
+      <div className="bg-slate-900 text-white px-3.5 py-2.5 rounded-xl shadow-xl text-xs space-y-1.5 border border-slate-700/50">
         <div className="font-bold text-slate-200 border-b border-slate-700/60 pb-1 flex items-center justify-between gap-4">
           <span>{label} {data.day ? `(${data.day})` : ''}</span>
-          {data.isToday && <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-bold">Live</span>}
+          {data.isToday && <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-bold">Today</span>}
         </div>
         {!hasData ? (
           <div className="text-slate-400 italic py-0.5">No readings recorded</div>
@@ -41,14 +41,20 @@ function CustomHistoryTooltip({ active, payload, label }) {
           <>
             {data.energy !== null && data.energy !== undefined && (
               <div className="flex items-center justify-between gap-4">
-                <span className="text-slate-400">Yield:</span>
+                <span className="text-slate-400">Daily Yield:</span>
                 <span className="font-bold text-emerald-400">{data.energy} kWh</span>
               </div>
             )}
             {data.power !== null && data.power !== undefined && (
               <div className="flex items-center justify-between gap-4">
-                <span className="text-slate-400">Power:</span>
+                <span className="text-slate-400">Peak Output:</span>
                 <span className="font-bold text-blue-400">{data.power} kW</span>
+              </div>
+            )}
+            {data.peakTime && data.peakTime !== '--' && (
+              <div className="flex items-center justify-between gap-4 text-[10px]">
+                <span className="text-slate-400">Peak Time:</span>
+                <span className="font-medium text-slate-300">{data.peakTime}</span>
               </div>
             )}
             {data.specificYield > 0 && (
@@ -75,9 +81,8 @@ export default function DeviceDashboard() {
   const [isOnline, setIsOnline] = useState(false);
   const [viewMode, setViewMode] = useState('combined');
   
-  // 10-Day Historical Analytics State (Real data only)
-  const [historyPeriod, setHistoryPeriod] = useState('10days');
-  const [historyMetric, setHistoryMetric] = useState('energy');
+  // 10-Day Historical Analytics State (Only 10 days)
+  const [historyMetric, setHistoryMetric] = useState('energy'); // 'energy' | 'power'
   const [historicalData, setHistoricalData] = useState([]);
   const [tenDaySummaries, setTenDaySummaries] = useState([]);
   const [csvExporting, setCsvExporting] = useState(false);
@@ -85,8 +90,8 @@ export default function DeviceDashboard() {
 
   // Edit Site Modal
   const [showEditModal, setShowEditModal] = useState(false);
-  const isCloudSynced = isFirebaseConfigured();
   const [editForm, setEditForm] = useState({ ...device });
+  const isCloudSynced = isFirebaseConfigured();
 
   // 1. MQTT Connection & Live Streaming
   useEffect(() => {
@@ -162,12 +167,12 @@ export default function DeviceDashboard() {
     };
   }, [serial]);
 
-  // Load IndexedDB 10-day history whenever period or serial changes
+  // Load 10-Day history (from Firebase Firestore or local IndexedDB)
   useEffect(() => {
     let isMounted = true;
     async function loadHistory() {
       const cap = device?.capacity_kw || 50;
-      const data = await getHistoricalAnalyticsDB(serial, historyPeriod, cap);
+      const data = await getHistoricalAnalyticsDB(serial, '10days', cap);
       if (isMounted) {
         setHistoricalData(data || []);
       }
@@ -178,7 +183,7 @@ export default function DeviceDashboard() {
     }
     loadHistory();
     return () => { isMounted = false; };
-  }, [historyPeriod, serial, device?.capacity_kw, liveData]);
+  }, [serial, device?.capacity_kw, liveData]);
 
   const handleSaveSiteDetails = () => {
     const updated = upsertDevice({ ...editForm, _userEdit: true });
@@ -198,15 +203,14 @@ export default function DeviceDashboard() {
       device,
       liveData: pdfData,
       historicalData,
-      selectedPeriod: historyPeriod
+      selectedPeriod: '10days'
     });
   };
 
   const handleExportCsv = async () => {
     try {
       setCsvExporting(true);
-      await export10DayCSV,
-  isFirebaseConfigured(serial, device);
+      await export10DayCSV(serial, device);
       setCsvSuccess(true);
       setTimeout(() => setCsvSuccess(false), 4000);
     } catch (err) {
@@ -293,7 +297,7 @@ export default function DeviceDashboard() {
     ? (timeDiffSec < 5 ? 'Just now' : `${timeDiffSec}s ago`) 
     : 'Offline';
 
-  const hasAnyChartData = historicalData.some(d => (d.energy > 0) || (d.power > 0));
+  const hasAnyChartData = historicalData.some(d => (d.energy > 0) || (d.power > 0) || d.hasData);
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-800 pb-20">
@@ -323,21 +327,6 @@ export default function DeviceDashboard() {
               className="flex items-center justify-center gap-1.5 p-2.5 md:p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-colors text-white font-semibold text-xs md:text-sm"
             >
               <Edit className="w-4 h-4" /> Edit Site
-            </button>
-            
-            {/* Export 10-Day CSV Button */}
-            <button 
-              onClick={handleExportCsv}
-              disabled={csvExporting}
-              className={`flex items-center justify-center gap-1.5 px-3.5 md:px-4 py-2.5 md:py-3 rounded-xl transition-all font-bold text-xs md:text-sm shadow-sm ${
-                csvSuccess 
-                  ? 'bg-emerald-500 text-white' 
-                  : 'bg-white/15 hover:bg-white/25 text-white border border-white/20'
-              }`}
-              title="Download 10 days of raw timestamped readings as CSV"
-            >
-              {csvSuccess ? <Check className="w-4 h-4" /> : <FileSpreadsheet className="w-4 h-4 text-oes-green" />}
-              <span>{csvSuccess ? 'CSV Exported!' : (csvExporting ? 'Exporting...' : 'Export 10-Day CSV')}</span>
             </button>
 
             {/* Generate PDF Button */}
@@ -483,89 +472,86 @@ export default function DeviceDashboard() {
           </div>
         </div>
 
-        {/* 6. HISTORICAL GENERATION & 10-DAY ANALYTICS CARD */}
+        {/* 6. PROPERLY ARRANGED 10-DAY GENERATION HISTORY & PEAK AUDIT */}
         <div className="bg-white rounded-3xl p-5 md:p-8 border border-slate-100 shadow-[0_8px_30px_-10px_rgba(0,0,0,0.05)] mx-2 md:mx-0 space-y-6">
+          
+          {/* Header Block: Balanced Flex Row */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <div className="bg-oes-blue/10 text-oes-blue p-2.5 rounded-2xl">
-                  <CalendarDays className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base md:text-lg font-bold text-slate-800 flex items-center gap-2">
-                    Generation History & 10-Day Storage
-                    {isCloudSynced ? (
-                      <span className="bg-amber-50 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-md border border-amber-200/50 flex items-center gap-1">
-                        <Cloud className="w-3 h-3 text-amber-600" /> Firebase Cloud
-                      </span>
-                    ) : (
-                      <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-md border border-emerald-200/50 flex items-center gap-1">
-                        <HardDrive className="w-3 h-3" /> 10-Day Local Store
-                      </span>
-                    )}
+            
+            {/* Title & Status Badge */}
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 bg-oes-blue/10 text-oes-blue rounded-2xl flex items-center justify-center shrink-0">
+                <CalendarDays className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base md:text-lg font-bold text-slate-800 tracking-tight">
+                    10-Day Generation History
                   </h3>
-                  <p className="text-xs text-slate-400 font-medium mt-0.5">
-                    {isCloudSynced
-                      ? 'Daily peak generation synced to Firebase cloud • Accessible from any device 24/7'
-                      : 'Daily peak generation saved in browser • Connect Firebase in Settings to sync across all devices'}
-                  </p>
+                  {isCloudSynced ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200/80">
+                      <Cloud className="w-3 h-3 text-amber-600" /> Cloud Synced
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80">
+                      <HardDrive className="w-3 h-3 text-emerald-600" /> Local Storage
+                    </span>
+                  )}
                 </div>
+                <p className="text-xs text-slate-400 font-medium mt-0.5">
+                  Daily peak power and total energy yield for the past 10 days
+                </p>
               </div>
             </div>
 
-            {/* Metric Mode & Period Controls */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Metric Mode Toggle & Export Button (Clean Single Row) */}
+            <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+              
+              {/* Metric Toggle */}
               <div className="bg-slate-100 p-1 rounded-xl flex items-center text-xs font-bold">
                 <button
                   onClick={() => setHistoryMetric('energy')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${historyMetric === 'energy' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                    historyMetric === 'energy' 
+                      ? 'bg-white text-slate-900 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
                 >
-                  Yield (kWh)
+                  <Zap className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Yield (kWh)</span>
                 </button>
                 <button
                   onClick={() => setHistoryMetric('power')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${historyMetric === 'power' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                    historyMetric === 'power' 
+                      ? 'bg-white text-slate-900 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
                 >
-                  Power (kW)
+                  <TrendingUp className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Peak Power (kW)</span>
                 </button>
               </div>
 
-              <div className="bg-slate-100 p-1 rounded-xl flex items-center text-xs font-bold">
-                {[
-                  { id: 'today', label: 'Today' },
-                  { id: 'yesterday', label: 'Yesterday' },
-                  { id: '7days', label: '7 Days' },
-                  { id: '10days', label: '10 Days' },
-                  { id: '30days', label: '30 Days' }
-                ].map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => setHistoryPeriod(p.id)}
-                    className={`px-3 py-1.5 rounded-lg transition-all ${
-                      historyPeriod === p.id 
-                        ? 'bg-oes-blue text-white shadow-sm' 
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
+              {/* Export 10-Day CSV Button */}
+              <button
+                onClick={handleExportCsv}
+                disabled={csvExporting}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors border border-slate-200/60"
+                title="Download complete 10-day peak readings as CSV"
+              >
+                {csvSuccess ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />}
+                <span>{csvSuccess ? 'Exported!' : 'Export CSV'}</span>
+              </button>
+
             </div>
           </div>
 
-          {/* Interactive Chart */}
-          <div className="w-full h-64 md:h-72 pt-2 relative">
-            {!hasAnyChartData && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/60 backdrop-blur-[1px] z-10 text-center p-4">
-                <Activity className="w-8 h-8 text-slate-300 mb-2 animate-pulse" />
-                <div className="text-sm font-bold text-slate-600">No telemetry recorded for this period yet</div>
-                <div className="text-xs text-slate-400 mt-1 max-w-sm">Data will populate automatically as the physical data logger transmits readings to the dashboard.</div>
-              </div>
-            )}
+          {/* 10-Day Interactive Chart */}
+          <div className="w-full h-64 md:h-72 pt-2">
             <ResponsiveContainer width="100%" height="100%">
               {historyMetric === 'energy' ? (
-                <BarChart data={historicalData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <BarChart data={historicalData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
                   <defs>
                     <linearGradient id="oesEnergyGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#10B981" stopOpacity={0.9} />
@@ -573,13 +559,30 @@ export default function DeviceDashboard() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                  <XAxis dataKey="time" stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} unit=" kWh" />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="#94A3B8" 
+                    fontSize={11} 
+                    tickLine={false} 
+                    axisLine={{ stroke: '#E2E8F0' }} 
+                  />
+                  <YAxis 
+                    stroke="#94A3B8" 
+                    fontSize={11} 
+                    tickLine={false} 
+                    axisLine={false} 
+                    unit=" kWh" 
+                  />
                   <Tooltip content={<CustomHistoryTooltip />} />
-                  <Bar dataKey="energy" fill="url(#oesEnergyGrad)" radius={[8, 8, 0, 0]} maxBarSize={45} />
+                  <Bar 
+                    dataKey="energy" 
+                    fill="url(#oesEnergyGrad)" 
+                    radius={[6, 6, 0, 0]} 
+                    maxBarSize={42} 
+                  />
                 </BarChart>
               ) : (
-                <AreaChart data={historicalData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <AreaChart data={historicalData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
                   <defs>
                     <linearGradient id="oesPowerGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.45} />
@@ -587,54 +590,79 @@ export default function DeviceDashboard() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                  <XAxis dataKey="time" stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} axisLine={false} unit=" kW" />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="#94A3B8" 
+                    fontSize={11} 
+                    tickLine={false} 
+                    axisLine={{ stroke: '#E2E8F0' }} 
+                  />
+                  <YAxis 
+                    stroke="#94A3B8" 
+                    fontSize={11} 
+                    tickLine={false} 
+                    axisLine={false} 
+                    unit=" kW" 
+                  />
                   <Tooltip content={<CustomHistoryTooltip />} />
-                  <Area type="monotone" dataKey="power" stroke="#3B82F6" strokeWidth={3} fillOpacity={1} fill="url(#oesPowerGrad)" />
+                  <Area 
+                    type="monotone" 
+                    dataKey="power" 
+                    stroke="#3B82F6" 
+                    strokeWidth={3} 
+                    fillOpacity={1} 
+                    fill="url(#oesPowerGrad)" 
+                  />
                 </AreaChart>
               )}
             </ResponsiveContainer>
           </div>
 
+          {!hasAnyChartData && (
+            <div className="flex items-center justify-center gap-2 py-2 px-4 bg-slate-50 rounded-xl text-xs text-slate-500 border border-slate-100">
+              <Activity className="w-3.5 h-3.5 text-slate-400 animate-pulse" />
+              <span>Awaiting first transmission — daily peaks will populate automatically as your data logger transmits live data.</span>
+            </div>
+          )}
+
           {/* 10-Day Yield Audit Table */}
           {tenDaySummaries.length > 0 && (
             <div className="pt-4 border-t border-slate-100">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                   <History className="w-4 h-4 text-oes-blue" /> 10-Day Plant Reading Log
                 </h4>
-                <button
-                  onClick={handleExportCsv}
-                  className="text-xs font-bold text-oes-blue hover:text-blue-700 flex items-center gap-1 self-start sm:self-auto"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" /> Download Complete 10-Day CSV Log
-                </button>
+                <span className="text-[11px] text-slate-400 font-medium">
+                  Showing all 10 days of recorded peak generation
+                </span>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto rounded-xl border border-slate-100">
                 <table className="w-full text-left text-xs">
                   <thead>
-                    <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase">
-                      <th className="py-2.5 px-3">Date</th>
-                      <th className="py-2.5 px-3">Daily Yield</th>
-                      <th className="py-2.5 px-3">Peak Power</th>
-                      <th className="py-2.5 px-3">Specific Yield</th>
-                      <th className="py-2.5 px-3">Avg Temp</th>
-                      <th className="py-2.5 px-3">Status</th>
+                    <tr className="bg-slate-50/80 border-b border-slate-100 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Daily Yield (kWh)</th>
+                      <th className="py-3 px-4">Peak Power (kW)</th>
+                      <th className="py-3 px-4">Specific Yield</th>
+                      <th className="py-3 px-4">Avg Temp</th>
+                      <th className="py-3 px-4 text-right">Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-50 font-medium">
+                  <tbody className="divide-y divide-slate-100 font-medium bg-white">
                     {tenDaySummaries.map((day, idx) => (
-                      <tr key={idx} className={`hover:bg-slate-50/80 transition-colors ${day.isToday ? 'bg-emerald-50/40 font-bold' : ''}`}>
-                        <td className="py-2.5 px-3 flex items-center gap-2">
-                          <span className="text-slate-800">{day.formattedDate}</span>
-                          <span className="text-[10px] text-slate-400 font-normal">({day.dayName})</span>
+                      <tr key={idx} className={`hover:bg-slate-50/80 transition-colors ${day.isToday ? 'bg-emerald-50/30' : ''}`}>
+                        <td className="py-3 px-4 flex items-center gap-2">
+                          <span className="font-bold text-slate-800">{day.formattedDate}</span>
+                          <span className="text-[11px] text-slate-400">({day.dayName})</span>
                           {day.isToday && (
-                            <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black">Today</span>
+                            <span className="text-[9px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-black uppercase">Today</span>
                           )}
                         </td>
-                        <td className="py-2.5 px-3 font-bold text-slate-800">{day.hasData ? `${day.totalKwh} kWh` : '--'}</td>
-                        <td className="py-2.5 px-3 text-slate-700">
+                        <td className="py-3 px-4 font-bold text-slate-800">
+                          {day.hasData ? `${day.totalKwh} kWh` : '--'}
+                        </td>
+                        <td className="py-3 px-4">
                           {day.hasData ? (
                             <div>
                               <span className="font-bold text-slate-800">{day.peakKw} kW</span>
@@ -644,10 +672,14 @@ export default function DeviceDashboard() {
                             </div>
                           ) : '--'}
                         </td>
-                        <td className="py-2.5 px-3 text-slate-600">{day.hasData ? `${day.specificYield} kWh/kWp` : '--'}</td>
-                        <td className="py-2.5 px-3 text-slate-500">{day.hasData && day.avgTemp > 0 ? `${day.avgTemp} °C` : '--'}</td>
-                        <td className="py-2.5 px-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        <td className="py-3 px-4 text-slate-600">
+                          {day.hasData && day.specificYield > 0 ? `${day.specificYield} kWh/kWp` : '--'}
+                        </td>
+                        <td className="py-3 px-4 text-slate-500">
+                          {day.hasData && day.avgTemp > 0 ? `${day.avgTemp} °C` : '--'}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <span className={`inline-block px-2.5 py-1 rounded-md text-[10px] font-bold ${
                             !day.hasData
                               ? 'bg-slate-100 text-slate-400'
                               : day.status === 'Active' 
