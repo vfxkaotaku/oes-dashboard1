@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { HashRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { Sun, Activity, ShieldCheck, Layers, HelpCircle, Settings, X, Cloud, HardDrive, CheckCircle2 } from 'lucide-react';
+import { Sun, Activity, ShieldCheck, Layers, HelpCircle, Settings, X, Cloud, HardDrive, CheckCircle2, Trash2 } from 'lucide-react';
 import FleetView from './pages/FleetView';
 import DeviceDashboard from './pages/DeviceDashboard';
-import { isFirebaseConfigured, getFirebaseConfig, saveFirebaseConfig } from './utils/storage';
+import { isFirebaseConfigured, getFirebaseConfig, saveFirebaseConfig, resetAllFleetData } from './utils/storage';
 import './index.css';
 
 // Helper to parse both pure JSON and Firebase JS snippet (const firebaseConfig = { ... })
@@ -200,6 +200,31 @@ function App() {
                     />
                     <p className="text-[10px] text-slate-400">Leave blank to use browser's built-in local IndexedDB storage.</p>
                   </div>
+                </div>
+
+                {/* 3. Fresh Start / Reset Fleet */}
+                <div className="space-y-3 pt-3 border-t border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-rose-600 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                      <Trash2 className="w-4 h-4 text-rose-500" /> Fresh Start / Reset Devices
+                    </h4>
+                  </div>
+                  <p className="text-slate-500 text-[11px] leading-relaxed">
+                    Wipe all currently registered data loggers and start freshly with zero devices. (Retains your MQTT & Firebase credentials).
+                  </p>
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm('Are you sure you want to remove all data loggers and start completely fresh? This cannot be undone.')) {
+                        resetAllFleetData();
+                        setShowSettings(false);
+                        window.location.reload();
+                      }
+                    }}
+                    className="px-4 py-2 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl font-bold text-xs hover:bg-rose-100 transition-colors flex items-center gap-2"
+                  >
+                    <Trash2 size={14} /> Clear All Devices & Fresh Start
+                  </button>
                 </div>
 
               </div>

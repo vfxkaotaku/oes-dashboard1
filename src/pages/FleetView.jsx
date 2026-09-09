@@ -5,7 +5,7 @@ import {
   MapPin, Edit, Trash2, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, X
 } from 'lucide-react';
 import mqtt from 'mqtt';
-import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, recordDeviceTelemetry, saveLastLiveData } from '../utils/storage';
+import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, unblacklistDevice, recordDeviceTelemetry, saveLastLiveData } from '../utils/storage';
 
 export default function FleetView() {
   const navigate = useNavigate();
@@ -178,6 +178,7 @@ export default function FleetView() {
       alert('A logger with this Device ID already exists.');
       return;
     }
+    unblacklistDevice(formState.serial_number);
     const updated = upsertDevice({ ...formState, _userEdit: true });
     setDevices(updated);
     setShowAddModal(false);
@@ -351,7 +352,25 @@ export default function FleetView() {
         {/* Mobile View: Cards */}
         <div className="block md:hidden divide-y divide-slate-100">
           {filtered.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-sm">No loggers found.</div>
+            devices.length === 0 ? (
+              <div className="py-12 px-4 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-blue-50 text-oes-blue mx-auto flex items-center justify-center mb-3 border border-blue-100 shadow-sm">
+                  <Server className="w-7 h-7 text-oes-blue" />
+                </div>
+                <h3 className="text-base font-bold text-slate-800 mb-1">No Data Loggers Added Yet</h3>
+                <p className="text-xs text-slate-500 mb-5 max-w-xs mx-auto leading-relaxed">
+                  Your fleet dashboard is ready for a fresh start. Once your ESP32 data logger connects, it will appear here automatically.
+                </p>
+                <button 
+                  onClick={handleOpenAddModal}
+                  className="inline-flex items-center gap-2 bg-oes-blue text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-md"
+                >
+                  <Plus className="w-4 h-4 text-oes-green-dark" /> Add First Logger
+                </button>
+              </div>
+            ) : (
+              <div className="p-8 text-center text-slate-500 text-sm">No loggers match your filter.</div>
+            )
           ) : (
             filtered.map(dev => {
               const live = liveData[dev.serial_number];
@@ -524,9 +543,29 @@ export default function FleetView() {
 
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan="8" className="p-12 text-center text-slate-400">
-                    <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    <p className="text-sm font-semibold">No data loggers match your filter.</p>
+                  <td colSpan="8" className="p-12 text-center">
+                    {devices.length === 0 ? (
+                      <div className="py-8 text-center">
+                        <div className="w-16 h-16 rounded-2xl bg-blue-50 text-oes-blue mx-auto flex items-center justify-center mb-4 border border-blue-100 shadow-sm">
+                          <Server className="w-8 h-8 text-oes-blue" />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-800 mb-1.5">No Data Loggers Added Yet</h3>
+                        <p className="text-xs text-slate-500 max-w-md mx-auto mb-5 leading-relaxed">
+                          Your fleet dashboard is ready for a fresh start. Once your ESP32 solar data loggers transmit data, they will automatically appear here. You can also manually register your logger right now.
+                        </p>
+                        <button 
+                          onClick={handleOpenAddModal}
+                          className="inline-flex items-center gap-2 bg-oes-blue hover:bg-slate-800 text-white px-6 py-2.5 rounded-xl font-bold text-xs shadow-lg shadow-oes-blue/20 transition-all active:scale-95"
+                        >
+                          <Plus className="w-4 h-4 text-oes-green-dark" /> Add Your First Logger
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-slate-400">
+                        <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm font-semibold">No data loggers match your filter.</p>
+                      </div>
+                    )}
                   </td>
                 </tr>
               )}
