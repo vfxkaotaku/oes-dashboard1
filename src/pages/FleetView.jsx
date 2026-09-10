@@ -95,60 +95,60 @@ export default function FleetView() {
           type = parts[2];
         }
 
-        if (!serial) return;
+        if (!serial || isDeviceBlacklisted(serial)) return;
         const now = Date.now();
         setLastSeenMap(prev => ({ ...prev, [serial]: now }));
         
-        let data;
+        let data = {};
         try {
           data = JSON.parse(message.toString());
         } catch (e) {
           // Add error log to UI
           setMqttDebugLogs(prev => {
-            const newLogs = [`ERROR parsing JSON for ${topic}`, ...prev];
+            const newLogs = ['ERROR parsing JSON for ' + topic, ...prev];
             return newLogs.slice(0, 5);
           });
           return;
         }
 
+        // Auto-register discovered logger if not present, and update status across state & Firestore
+        const syncOrRegisterDevice = (devInfo, defaultStatus = 'online') => {
+          setDevices(prev => {
+            const existing = prev.find(d => d.serial_number === serial);
+            if (!existing) {
+              const newDev = {
+                serial_number: serial,
+                client_name: devInfo.device_name || devInfo.plant || ('Logger ' + serial),
+                site_name: devInfo.site_name || 'Solar Site',
+                location: devInfo.location || 'Site Location',
+                inverter_model: devInfo.inv ? ('Multi-Inverter (' + devInfo.inv.length + ')') : (devInfo.inverter_model || 'Solar Inverter'),
+                capacity_kw: Number(devInfo.capacity_kw) || 50,
+                status: defaultStatus,
+                last_seen: new Date().toISOString()
+              };
+              upsertDevice(newDev); // Automatically saves to localStorage and syncs to Firestore!
+              return [newDev, ...prev];
+            } else {
+              const updatedStatus = defaultStatus || existing.status || 'online';
+              return prev.map(d => d.serial_number === serial ? {
+                ...d,
+                status: updatedStatus,
+                last_seen: new Date().toISOString()
+              } : d);
+            }
+          });
+        };
+
         if (type === 'telemetry' || type === 'live') {
           setLiveData(prev => ({ ...prev, [serial]: data }));
           recordDeviceTelemetry(serial, data);
-            saveLastLiveData(serial, data); // Cache for instant DeviceDashboard load
-
-          // Auto-register discovered logger if not present (skip if user deleted it)
-          setDevices(prev => {
-            if (!prev.find(d => d.serial_number === serial) && !isDeviceBlacklisted(serial)) {
-              const newDev = {
-                serial_number: serial,
-                client_name: data.device_name || data.plant || `Logger ${serial}`,
-                site_name: 'Solar Site',
-                location: 'Unknown Location',
-                inverter_model: data.inv ? `Multi-Inverter (${data.inv.length})` : 'Solar Inverter',
-                capacity_kw: 50,
-                status: 'online',
-                last_seen: new Date().toISOString()
-              };
-              const updated = [newDev, ...prev];
-              saveDevices(updated);
-              return updated;
-            }
-            return prev.map(d => d.serial_number === serial ? { ...d, status: 'online', last_seen: new Date().toISOString() } : d);
-          });
-
+          saveLastLiveData(serial, data); // Cache for instant DeviceDashboard load
+          syncOrRegisterDevice(data, 'online');
         } else if (type === 'status') {
           const isOnline = data.online === true || data.online === 1;
-          setDevices(prev => prev.map(d => 
-            d.serial_number === serial 
-              ? { ...d, status: isOnline ? 'online' : 'offline', last_seen: new Date().toISOString() } 
-              : d
-          ));
-        } else if (type === 'heartbeat') {
-          setDevices(prev => prev.map(d => 
-            d.serial_number === serial 
-              ? { ...d, status: 'online', last_seen: new Date().toISOString() } 
-              : d
-          ));
+          syncOrRegisterDevice(data, isOnline ? 'online' : 'offline');
+        } else if (type === 'heartbeat' || type === 'config') {
+          syncOrRegisterDevice(data, 'online');
         }
       } catch (e) {
         // Ignore parsing errors on malformed messages

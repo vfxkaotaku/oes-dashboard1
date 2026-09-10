@@ -47,6 +47,19 @@ export const DEFAULT_DEVICES = [];
 export function performFreshStartMigration() {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return;
+
+    // Ensure real hardware logger IDs (like OES-DL-D07A) are never blocked in deleted serials
+    const storedBl = localStorage.getItem('oes_deleted_serials');
+    if (storedBl) {
+      try {
+        const bl = JSON.parse(storedBl);
+        const unblocked = bl.filter(s => s !== 'OES-DL-D07A');
+        if (unblocked.length !== bl.length) {
+          localStorage.setItem('oes_deleted_serials', JSON.stringify(unblocked));
+        }
+      } catch(e) {}
+    }
+
     if (!localStorage.getItem('oes_v5_clean_slate')) {
       const legacyKeys = [
         'oes_cloud_devices_v4',
@@ -70,8 +83,8 @@ export function performFreshStartMigration() {
       // Set fresh empty device registry
       localStorage.setItem(DEVICES_KEY, JSON.stringify([]));
 
-      // Blacklist known test serials so stale MQTT retained broker messages don't re-add them
-      const blacklist = ['OES-DL-D07A', 'DEMO-SITE-01', 'OES-DEMO-01'];
+      // Blacklist only pure mock demo serials (never real OES-DL loggers)
+      const blacklist = ['DEMO-SITE-01', 'OES-DEMO-01'];
       localStorage.setItem('oes_deleted_serials', JSON.stringify(blacklist));
 
       // Clear local IndexedDB telemetry if present
@@ -123,9 +136,61 @@ export function subscribeToCloudDevices(callback) {
   return subscribeDevicesFirestore((cloudDevices) => {
     if (!cloudDevices) return;
     const validCloud = cloudDevices.filter(d => d && d.serial_number && !isDeviceBlacklisted(d.serial_number));
-    saveDevices(validCloud);
+    const localDevices = getDevices();
+
+    // If Firestore has 0 devices (e.g. empty cloud or initial load),
+    // but local storage already has registered devices, preserve them and populate Firestore!
+    if (validCloud.length === 0 && localDevices.length > 0) {
+      localDevices.forEach(d => {
+        if (d && d.serial_number && !isDeviceBlacklisted(d.serial_number)) {
+          saveDeviceFirestore(d).catch(() => {});
+        }
+      });
+      if (typeof callback === 'function') {
+        callback(localDevices);
+      }
+      return;
+    }
+
+    // Merge Firestore cloud devices with local devices
+    const map = new Map();
+
+    // 1. Add current non-blacklisted local devices
+    localDevices.forEach(d => {
+      if (d && d.serial_number && !isDeviceBlacklisted(d.serial_number)) {
+        map.set(d.serial_number, d);
+      }
+    });
+
+    // 2. Overlay cloud devices (cloud metadata takes precedence for fleet parity)
+    validCloud.forEach(cd => {
+      const existing = map.get(cd.serial_number);
+      if (existing) {
+        map.set(cd.serial_number, {
+          ...existing,
+          ...cd,
+          // Retain local 'online' status if currently transmitting telemetry
+          status: existing.status === 'online' ? 'online' : (cd.status || 'offline'),
+          last_seen: existing.last_seen || cd.last_seen || new Date().toISOString()
+        });
+      } else {
+        map.set(cd.serial_number, cd);
+      }
+    });
+
+    // 3. Upload any local device not yet in Firestore up to cloud in background
+    localDevices.forEach(ld => {
+      if (ld && ld.serial_number && !isDeviceBlacklisted(ld.serial_number)) {
+        if (!validCloud.some(cd => cd.serial_number === ld.serial_number)) {
+          saveDeviceFirestore(ld).catch(() => {});
+        }
+      }
+    });
+
+    const merged = Array.from(map.values());
+    saveDevices(merged);
     if (typeof callback === 'function') {
-      callback(validCloud);
+      callback(merged);
     }
   });
 }
@@ -134,9 +199,19 @@ export async function syncDevicesFromCloud() {
   try {
     if (!isFirebaseConfigured()) return getDevices();
     const cloudDevices = await getDevicesFirestore();
-    if (!cloudDevices || cloudDevices.length === 0) return getDevices();
-
     const localDevices = getDevices();
+
+    if (!cloudDevices || cloudDevices.length === 0) {
+      if (localDevices && localDevices.length > 0) {
+        localDevices.forEach(d => {
+          if (d && d.serial_number && !isDeviceBlacklisted(d.serial_number)) {
+            saveDeviceFirestore(d).catch(() => {});
+          }
+        });
+      }
+      return localDevices;
+    }
+
     const map = new Map();
 
     // 1. Put local devices in map
@@ -158,6 +233,15 @@ export async function syncDevicesFromCloud() {
           });
         } else {
           map.set(cd.serial_number, cd);
+        }
+      }
+    });
+
+    // 3. Push any local-only devices to Firestore
+    localDevices.forEach(ld => {
+      if (ld && ld.serial_number && !isDeviceBlacklisted(ld.serial_number)) {
+        if (!cloudDevices.some(cd => cd.serial_number === ld.serial_number)) {
+          saveDeviceFirestore(ld).catch(() => {});
         }
       }
     });
@@ -270,7 +354,7 @@ export function resetAllFleetData() {
     }
     toRemove.forEach(k => localStorage.removeItem(k));
     localStorage.setItem(DEVICES_KEY, JSON.stringify([]));
-    localStorage.setItem('oes_deleted_serials', JSON.stringify(['OES-DL-D07A', 'DEMO-SITE-01', 'OES-DEMO-01']));
+    localStorage.setItem('oes_deleted_serials', JSON.stringify(['DEMO-SITE-01', 'OES-DEMO-01']));
     localStorage.setItem('oes_v5_clean_slate', 'true');
     
     if (window.indexedDB) {
