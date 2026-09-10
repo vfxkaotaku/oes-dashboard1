@@ -5,7 +5,7 @@ import {
   MapPin, Edit, Trash2, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, X
 } from 'lucide-react';
 import mqtt from 'mqtt';
-import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, unblacklistDevice, recordDeviceTelemetry, saveLastLiveData, syncDevicesFromCloud } from '../utils/storage';
+import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, unblacklistDevice, recordDeviceTelemetry, saveLastLiveData, syncDevicesFromCloud, subscribeToCloudDevices } from '../utils/storage';
 
 export default function FleetView() {
   const navigate = useNavigate();
@@ -44,13 +44,13 @@ export default function FleetView() {
     });
     setLastSeenMap(initialSeen);
 
-    // Sync from Firestore Cloud Registry (enables phone & multi-device sync)
-    syncDevicesFromCloud().then(cloudMerged => {
-      if (cloudMerged && Array.isArray(cloudMerged) && cloudMerged.length > 0) {
-        setDevices(cloudMerged);
+    // Real-time live Firestore Cloud Sync (instantly updates across all phones & PCs)
+    const unsubCloud = subscribeToCloudDevices((cloudDevices) => {
+      if (cloudDevices && Array.isArray(cloudDevices)) {
+        setDevices(cloudDevices);
         setLastSeenMap(prev => {
           const next = { ...prev };
-          cloudMerged.forEach(d => {
+          cloudDevices.forEach(d => {
             if (!next[d.serial_number]) {
               next[d.serial_number] = d.last_seen ? new Date(d.last_seen).getTime() : Date.now();
             }

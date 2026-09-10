@@ -13,7 +13,8 @@ import {
   collection, 
   query, 
   where, 
-  getDocs 
+  getDocs,
+  onSnapshot 
 } from 'firebase/firestore';
 
 const STORAGE_KEY_FIREBASE = 'oes_firebase_config';
@@ -152,6 +153,35 @@ export async function deleteDeviceFirestore(serial) {
 /**
  * Fetch all registered devices from Firestore central registry
  */
+/**
+ * Subscribe to real-time live device updates from Firestore
+ */
+export function subscribeDevicesFirestore(callback) {
+  try {
+    const db = getFirestoreInstance();
+    if (!db) return () => {};
+
+    const q = collection(db, 'devices');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const devices = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data && data.serial_number) {
+          devices.push(data);
+        }
+      });
+      callback(devices);
+    }, (error) => {
+      console.warn('Firestore devices listener warning:', error);
+    });
+
+    return unsubscribe;
+  } catch (err) {
+    console.warn('subscribeDevicesFirestore error:', err);
+    return () => {};
+  }
+}
+
 export async function getDevicesFirestore() {
   try {
     const db = getFirestoreInstance();

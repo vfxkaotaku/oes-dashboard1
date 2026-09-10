@@ -19,7 +19,8 @@ import {
   DEFAULT_FIREBASE_CONFIG,
   saveDeviceFirestore,
   deleteDeviceFirestore,
-  getDevicesFirestore
+  getDevicesFirestore,
+  subscribeDevicesFirestore
 } from './firebase';
 
 export { 
@@ -109,6 +110,22 @@ export function saveDevices(devices) {
  * Synchronize registered devices with Firebase Firestore Central Cloud Registry
  * Fetches cloud devices and merges them into local storage so any phone or PC sees all devices.
  */
+/**
+ * Subscribe to real-time cloud device registry changes:
+ * Instantly reflects edits, additions, and deletions made from any phone or PC live.
+ */
+export function subscribeToCloudDevices(callback) {
+  if (!isFirebaseConfigured()) return () => {};
+  return subscribeDevicesFirestore((cloudDevices) => {
+    if (!cloudDevices) return;
+    const validCloud = cloudDevices.filter(d => d && d.serial_number && !isDeviceBlacklisted(d.serial_number));
+    saveDevices(validCloud);
+    if (typeof callback === 'function') {
+      callback(validCloud);
+    }
+  });
+}
+
 export async function syncDevicesFromCloud() {
   try {
     if (!isFirebaseConfigured()) return getDevices();
