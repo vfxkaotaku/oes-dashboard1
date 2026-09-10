@@ -20,7 +20,9 @@ import {
   saveDeviceFirestore,
   deleteDeviceFirestore,
   getDevicesFirestore,
-  subscribeDevicesFirestore
+  subscribeDevicesFirestore,
+  saveGlobalSettingsFirestore,
+  subscribeGlobalSettingsFirestore
 } from './firebase';
 
 export { 
@@ -28,7 +30,9 @@ export {
   isFirebaseConfigured, 
   getFirebaseConfig, 
   saveFirebaseConfig,
-  DEFAULT_FIREBASE_CONFIG
+  DEFAULT_FIREBASE_CONFIG,
+  saveGlobalSettingsFirestore,
+  subscribeGlobalSettingsFirestore
 };
 
 const DEVICES_KEY = 'oes_cloud_devices_v5';

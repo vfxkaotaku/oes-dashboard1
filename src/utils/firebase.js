@@ -1,6 +1,7 @@
 /**
- * OES Solar Cloud - Firebase Firestore Central 10-Day Peak Storage & Device Registry
- * Allows all users and devices to view the same 10-day historical peaks and fleet devices from anywhere.
+ * OES Solar Cloud - Firebase Firestore Central 10-Day Peak Storage & Cloud Settings
+ * Allows all settings (MQTT broker, topic, Firebase API) and devices to be edited from any device
+ * with real-time live synchronization across all phones, tablets, and PCs.
  */
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
@@ -21,7 +22,6 @@ const STORAGE_KEY_FIREBASE = 'oes_firebase_config';
 
 /**
  * Built-in default Firebase configuration for OES Solar Cloud
- * Ensures that any phone, tablet, or browser connects to Firestore out of the box.
  */
 export const DEFAULT_FIREBASE_CONFIG = {
   apiKey: "AIzaSyAD04Ak97IJ5NGbVMTSwIQIidc7Y5qXbPA",
@@ -32,11 +32,84 @@ export const DEFAULT_FIREBASE_CONFIG = {
 };
 
 /**
- * Get stored Firebase configuration (checks localStorage override, env vars, then default)
+ * Dedicated bootstrap Firestore instance for system configuration synchronization
+ * Stays connected even if user disconnects the primary app database.
+ */
+function getBootstrapFirestore() {
+  try {
+    const apps = getApps();
+    let app = apps.find(a => a.name === 'oes_cloud_settings');
+    if (!app) {
+      app = initializeApp(DEFAULT_FIREBASE_CONFIG, 'oes_cloud_settings');
+    }
+    return getFirestore(app);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Save global dashboard settings to the cloud
+ * (MQTT host, MQTT topic prefix, and Firebase API configuration)
+ */
+export async function saveGlobalSettingsFirestore(settings) {
+  try {
+    const db = getBootstrapFirestore();
+    if (!db) return false;
+
+    const docRef = doc(db, 'system_config', 'global_settings');
+    await setDoc(docRef, {
+      mqttHost: settings.mqttHost || 'wss://broker.emqx.io:8084/mqtt',
+      mqttPrefix: settings.mqttPrefix || 'oes',
+      firebaseConfig: settings.firebaseConfig || null,
+      firebaseDisabled: !!settings.firebaseDisabled,
+      updatedAt: Date.now()
+    }, { merge: true });
+
+    return true;
+  } catch (err) {
+    console.warn('saveGlobalSettingsFirestore error:', err);
+    return false;
+  }
+}
+
+/**
+ * Real-time listener for global dashboard settings
+ * Propagates MQTT and Firebase setting changes to all phones & PCs in real-time.
+ */
+export function subscribeGlobalSettingsFirestore(callback) {
+  try {
+    const db = getBootstrapFirestore();
+    if (!db) return () => {};
+
+    const docRef = doc(db, 'system_config', 'global_settings');
+    return onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (typeof callback === 'function') {
+          callback(data);
+        }
+      }
+    }, (err) => {
+      console.warn('subscribeGlobalSettingsFirestore warning:', err);
+    });
+  } catch (err) {
+    console.warn('subscribeGlobalSettingsFirestore error:', err);
+    return () => {};
+  }
+}
+
+/**
+ * Get active Firebase configuration
+ * (Honors cloud/local disable flags, user custom overrides, or default project)
  */
 export function getFirebaseConfig() {
   try {
-    // 1. Check user manual override in localStorage
+    // 1. Check if user explicitly disabled/deleted Firebase API
+    if (localStorage.getItem('oes_firebase_disabled') === 'true') {
+      return null;
+    }
+    // 2. Check user manual override in localStorage
     const stored = localStorage.getItem(STORAGE_KEY_FIREBASE);
     if (stored) {
       try {
@@ -46,7 +119,7 @@ export function getFirebaseConfig() {
         }
       } catch (e) {}
     }
-    // 2. Check environment variables
+    // 3. Check Vite environment variables
     if (import.meta.env.VITE_FIREBASE_API_KEY && import.meta.env.VITE_FIREBASE_PROJECT_ID) {
       return {
         apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -57,7 +130,7 @@ export function getFirebaseConfig() {
         appId: import.meta.env.VITE_FIREBASE_APP_ID
       };
     }
-    // 3. Built-in default configuration
+    // 4. Default built-in Cloud configuration
     return DEFAULT_FIREBASE_CONFIG;
   } catch (e) {
     return DEFAULT_FIREBASE_CONFIG;
@@ -65,15 +138,17 @@ export function getFirebaseConfig() {
 }
 
 /**
- * Save Firebase configuration to localStorage (or reset to default if empty)
+ * Save Firebase configuration to localStorage
  */
 export function saveFirebaseConfig(config) {
   try {
     if (!config || !config.projectId) {
       localStorage.removeItem(STORAGE_KEY_FIREBASE);
+      localStorage.setItem('oes_firebase_disabled', 'true');
       return false;
     }
     localStorage.setItem(STORAGE_KEY_FIREBASE, JSON.stringify(config));
+    localStorage.removeItem('oes_firebase_disabled');
     return true;
   } catch (e) {
     console.error('Failed to save Firebase config', e);
@@ -90,18 +165,17 @@ export function isFirebaseConfigured() {
 }
 
 /**
- * Get or initialize Firebase App and Firestore instance
+ * Get primary Firestore instance for device records and telemetry
  */
 function getFirestoreInstance() {
   try {
     const config = getFirebaseConfig();
     if (!config || !config.projectId || !config.apiKey) return null;
 
-    let app;
-    if (getApps().length === 0) {
+    const apps = getApps();
+    let app = apps.find(a => a.name === '[DEFAULT]');
+    if (!app) {
       app = initializeApp(config);
-    } else {
-      app = getApp();
     }
     return getFirestore(app);
   } catch (e) {
@@ -153,6 +227,26 @@ export async function deleteDeviceFirestore(serial) {
 /**
  * Fetch all registered devices from Firestore central registry
  */
+export async function getDevicesFirestore() {
+  try {
+    const db = getFirestoreInstance();
+    if (!db) return [];
+
+    const snap = await getDocs(collection(db, 'devices'));
+    const devices = [];
+    snap.forEach(d => {
+      const data = d.data();
+      if (data && data.serial_number) {
+        devices.push(data);
+      }
+    });
+    return devices;
+  } catch (err) {
+    console.warn('Firestore getDevices error:', err);
+    return [];
+  }
+}
+
 /**
  * Subscribe to real-time live device updates from Firestore
  */
@@ -179,26 +273,6 @@ export function subscribeDevicesFirestore(callback) {
   } catch (err) {
     console.warn('subscribeDevicesFirestore error:', err);
     return () => {};
-  }
-}
-
-export async function getDevicesFirestore() {
-  try {
-    const db = getFirestoreInstance();
-    if (!db) return [];
-
-    const snap = await getDocs(collection(db, 'devices'));
-    const devices = [];
-    snap.forEach(d => {
-      const data = d.data();
-      if (data && data.serial_number) {
-        devices.push(data);
-      }
-    });
-    return devices;
-  } catch (err) {
-    console.warn('Firestore getDevices error:', err);
-    return [];
   }
 }
 
@@ -314,7 +388,6 @@ export async function get10DayPeaksFirestore(serial, capacityKw = 50) {
     const db = getFirestoreInstance();
     if (!db) return null;
 
-    const tenDaysAgo = Date.now() - (10 * 24 * 60 * 60 * 1000);
     const q = query(
       collection(db, 'daily_peaks'),
       where('serial', '==', serial)

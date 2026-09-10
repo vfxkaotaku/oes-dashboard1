@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { Sun, Activity, ShieldCheck, Layers, HelpCircle, Settings, X, Cloud, HardDrive, CheckCircle2, Trash2 } from 'lucide-react';
 import FleetView from './pages/FleetView';
 import DeviceDashboard from './pages/DeviceDashboard';
-import { isFirebaseConfigured, getFirebaseConfig, saveFirebaseConfig, resetAllFleetData, DEFAULT_FIREBASE_CONFIG } from './utils/storage';
+import { isFirebaseConfigured, getFirebaseConfig, saveFirebaseConfig, resetAllFleetData, DEFAULT_FIREBASE_CONFIG, saveGlobalSettingsFirestore, subscribeGlobalSettingsFirestore } from './utils/storage';
 import './index.css';
 
 // Helper to parse both pure JSON and Firebase JS snippet (const firebaseConfig = { ... })
@@ -51,23 +51,78 @@ function App() {
     return cfg ? JSON.stringify(cfg, null, 2) : '';
   });
 
-  const handleSaveSettings = () => {
+  // Listen for real-time cloud settings updates across all phones & PCs
+  useEffect(() => {
+    const unsub = subscribeGlobalSettingsFirestore((cloudSettings) => {
+      if (!cloudSettings) return;
+      if (cloudSettings.mqttHost && cloudSettings.mqttHost !== localStorage.getItem('oes_mqtt_host')) {
+        localStorage.setItem('oes_mqtt_host', cloudSettings.mqttHost);
+        setMqttHost(cloudSettings.mqttHost);
+      }
+      if (cloudSettings.mqttPrefix && cloudSettings.mqttPrefix !== localStorage.getItem('oes_mqtt_prefix')) {
+        localStorage.setItem('oes_mqtt_prefix', cloudSettings.mqttPrefix);
+        setMqttPrefix(cloudSettings.mqttPrefix);
+      }
+      if (cloudSettings.firebaseDisabled === true) {
+        localStorage.setItem('oes_firebase_disabled', 'true');
+        localStorage.removeItem('oes_firebase_config');
+        setFirebaseConfigStr('');
+      } else if (cloudSettings.firebaseConfig && (!isFirebaseConfigured() || cloudSettings.firebaseConfig.projectId !== getFirebaseConfig()?.projectId)) {
+        localStorage.removeItem('oes_firebase_disabled');
+        localStorage.setItem('oes_firebase_config', JSON.stringify(cloudSettings.firebaseConfig));
+        setFirebaseConfigStr(JSON.stringify(cloudSettings.firebaseConfig, null, 2));
+      }
+    });
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, []);
+
+  const handleSaveSettings = async () => {
     localStorage.setItem('oes_mqtt_host', mqttHost);
     localStorage.setItem('oes_mqtt_prefix', mqttPrefix);
 
+    let parsed = null;
+    let isDisabled = false;
+
     if (firebaseConfigStr.trim()) {
-      const parsed = parseFirebaseInput(firebaseConfigStr);
+      parsed = parseFirebaseInput(firebaseConfigStr);
       if (!parsed || !parsed.apiKey || !parsed.projectId) {
         alert('Could not find apiKey or projectId in your Firebase configuration. Please check the snippet.');
         return;
       }
       saveFirebaseConfig(parsed);
     } else {
+      isDisabled = true;
       saveFirebaseConfig(null);
     }
 
+    // Broadcast update to cloud so all phones and PCs sync immediately
+    await saveGlobalSettingsFirestore({
+      mqttHost,
+      mqttPrefix,
+      firebaseConfig: parsed,
+      firebaseDisabled: isDisabled
+    });
+
     setShowSettings(false);
     window.location.reload();
+  };
+
+  const handleDeleteFirebaseEverywhere = async () => {
+    if (window.confirm('Are you sure you want to delete the Firebase Cloud API from everywhere? This will disconnect cloud storage across all phones, computers, and tablets.')) {
+      setFirebaseConfigStr('');
+      saveFirebaseConfig(null);
+      await saveGlobalSettingsFirestore({
+        mqttHost,
+        mqttPrefix,
+        firebaseConfig: null,
+        firebaseDisabled: true
+      });
+      setShowSettings(false);
+      window.location.reload();
+    }
   };
 
   const isCloudActive = isFirebaseConfigured();
@@ -192,15 +247,25 @@ function App() {
                   </p>
 
                   <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <label className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">Firebase Config (JSON snippet)</label>
-                      <button
-                        type="button"
-                        onClick={() => setFirebaseConfigStr(JSON.stringify(DEFAULT_FIREBASE_CONFIG, null, 2))}
-                        className="text-[10px] text-oes-blue font-bold hover:underline"
-                      >
-                        Reset to Project Default
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setFirebaseConfigStr(JSON.stringify(DEFAULT_FIREBASE_CONFIG, null, 2))}
+                          className="text-[10px] text-oes-blue font-bold hover:underline"
+                        >
+                          Restore Default
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDeleteFirebaseEverywhere}
+                          className="text-[10px] text-rose-600 font-bold hover:underline flex items-center gap-0.5"
+                          title="Deletes the Cloud API configuration from all connected devices"
+                        >
+                          <Trash2 size={11} /> Delete API Everywhere
+                        </button>
+                      </div>
                     </div>
                     <textarea 
                       rows={6}
@@ -253,7 +318,7 @@ function App() {
                   onClick={handleSaveSettings}
                   className="px-5 py-2 text-xs font-bold text-white bg-oes-blue rounded-xl hover:bg-[#00284A] transition-colors shadow-sm"
                 >
-                  Save & Apply
+                  Save & Sync to All Devices
                 </button>
               </div>
             </div>
