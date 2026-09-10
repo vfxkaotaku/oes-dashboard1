@@ -1,6 +1,6 @@
 /**
- * OES Solar Cloud - Firebase Firestore Central 10-Day Peak Storage
- * Allows all users and devices to view the same 10-day historical peaks from anywhere.
+ * OES Solar Cloud - Firebase Firestore Central 10-Day Peak Storage & Device Registry
+ * Allows all users and devices to view the same 10-day historical peaks and fleet devices from anywhere.
  */
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
@@ -9,6 +9,7 @@ import {
   doc, 
   getDoc, 
   setDoc, 
+  deleteDoc,
   collection, 
   query, 
   where, 
@@ -18,14 +19,31 @@ import {
 const STORAGE_KEY_FIREBASE = 'oes_firebase_config';
 
 /**
- * Get stored Firebase configuration
+ * Built-in default Firebase configuration for OES Solar Cloud
+ * Ensures that any phone, tablet, or browser connects to Firestore out of the box.
+ */
+export const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAD04Ak97IJ5NGbVMTSwIQIidc7Y5qXbPA",
+  authDomain: "oes-solar-cloud.firebaseapp.com",
+  projectId: "oes-solar-cloud",
+  storageBucket: "oes-solar-cloud.firebasestorage.app",
+  messagingSenderId: "364837731305"
+};
+
+/**
+ * Get stored Firebase configuration (checks localStorage override, env vars, then default)
  */
 export function getFirebaseConfig() {
   try {
-    // 1. Check localStorage first (user-configured in UI)
+    // 1. Check user manual override in localStorage
     const stored = localStorage.getItem(STORAGE_KEY_FIREBASE);
     if (stored) {
-      return JSON.parse(stored);
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.projectId && parsed.apiKey) {
+          return parsed;
+        }
+      } catch (e) {}
     }
     // 2. Check environment variables
     if (import.meta.env.VITE_FIREBASE_API_KEY && import.meta.env.VITE_FIREBASE_PROJECT_ID) {
@@ -38,14 +56,15 @@ export function getFirebaseConfig() {
         appId: import.meta.env.VITE_FIREBASE_APP_ID
       };
     }
-    return null;
+    // 3. Built-in default configuration
+    return DEFAULT_FIREBASE_CONFIG;
   } catch (e) {
-    return null;
+    return DEFAULT_FIREBASE_CONFIG;
   }
 }
 
 /**
- * Save Firebase configuration to localStorage
+ * Save Firebase configuration to localStorage (or reset to default if empty)
  */
 export function saveFirebaseConfig(config) {
   try {
@@ -87,6 +106,69 @@ function getFirestoreInstance() {
   } catch (e) {
     console.warn('Firebase init warning:', e);
     return null;
+  }
+}
+
+/**
+ * Save device to Firestore central registry
+ */
+export async function saveDeviceFirestore(device) {
+  try {
+    if (!device || !device.serial_number) return;
+    const db = getFirestoreInstance();
+    if (!db) return;
+
+    await setDoc(doc(db, 'devices', device.serial_number), {
+      serial_number: device.serial_number,
+      client_name: device.client_name || 'Solar Client',
+      site_name: device.site_name || 'Solar Site',
+      location: device.location || '',
+      inverter_model: device.inverter_model || 'Solar Inverter',
+      capacity_kw: Number(device.capacity_kw) || 50,
+      status: device.status || 'online',
+      last_seen: device.last_seen || new Date().toISOString(),
+      updatedAt: Date.now()
+    }, { merge: true });
+  } catch (err) {
+    console.warn('Firestore saveDevice error:', err);
+  }
+}
+
+/**
+ * Delete device from Firestore central registry
+ */
+export async function deleteDeviceFirestore(serial) {
+  try {
+    if (!serial) return;
+    const db = getFirestoreInstance();
+    if (!db) return;
+
+    await deleteDoc(doc(db, 'devices', serial));
+  } catch (err) {
+    console.warn('Firestore deleteDevice error:', err);
+  }
+}
+
+/**
+ * Fetch all registered devices from Firestore central registry
+ */
+export async function getDevicesFirestore() {
+  try {
+    const db = getFirestoreInstance();
+    if (!db) return [];
+
+    const snap = await getDocs(collection(db, 'devices'));
+    const devices = [];
+    snap.forEach(d => {
+      const data = d.data();
+      if (data && data.serial_number) {
+        devices.push(data);
+      }
+    });
+    return devices;
+  } catch (err) {
+    console.warn('Firestore getDevices error:', err);
+    return [];
   }
 }
 

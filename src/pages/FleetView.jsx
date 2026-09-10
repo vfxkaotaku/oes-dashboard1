@@ -5,7 +5,7 @@ import {
   MapPin, Edit, Trash2, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, X
 } from 'lucide-react';
 import mqtt from 'mqtt';
-import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, unblacklistDevice, recordDeviceTelemetry, saveLastLiveData } from '../utils/storage';
+import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, unblacklistDevice, recordDeviceTelemetry, saveLastLiveData, syncDevicesFromCloud } from '../utils/storage';
 
 export default function FleetView() {
   const navigate = useNavigate();
@@ -32,7 +32,7 @@ export default function FleetView() {
     capacity_kw: 50
   });
 
-  // Load devices on mount
+  // Load devices on mount & sync with Firestore cloud registry
   useEffect(() => {
     const loaded = getDevices();
     setDevices(loaded);
@@ -43,6 +43,22 @@ export default function FleetView() {
       initialSeen[d.serial_number] = d.last_seen ? new Date(d.last_seen).getTime() : Date.now();
     });
     setLastSeenMap(initialSeen);
+
+    // Sync from Firestore Cloud Registry (enables phone & multi-device sync)
+    syncDevicesFromCloud().then(cloudMerged => {
+      if (cloudMerged && Array.isArray(cloudMerged) && cloudMerged.length > 0) {
+        setDevices(cloudMerged);
+        setLastSeenMap(prev => {
+          const next = { ...prev };
+          cloudMerged.forEach(d => {
+            if (!next[d.serial_number]) {
+              next[d.serial_number] = d.last_seen ? new Date(d.last_seen).getTime() : Date.now();
+            }
+          });
+          return next;
+        });
+      }
+    });
 
     // Connect to WebSocket MQTT Broker
     const mqttHost = localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt';

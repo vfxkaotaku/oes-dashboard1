@@ -15,14 +15,19 @@ import {
   get10DayPeaksFirestore,
   isFirebaseConfigured,
   getFirebaseConfig,
-  saveFirebaseConfig
+  saveFirebaseConfig,
+  DEFAULT_FIREBASE_CONFIG,
+  saveDeviceFirestore,
+  deleteDeviceFirestore,
+  getDevicesFirestore
 } from './firebase';
 
 export { 
   export10DayCSV, 
   isFirebaseConfigured, 
   getFirebaseConfig, 
-  saveFirebaseConfig 
+  saveFirebaseConfig,
+  DEFAULT_FIREBASE_CONFIG
 };
 
 const DEVICES_KEY = 'oes_cloud_devices_v5';
@@ -100,11 +105,57 @@ export function saveDevices(devices) {
   }
 }
 
+/**
+ * Synchronize registered devices with Firebase Firestore Central Cloud Registry
+ * Fetches cloud devices and merges them into local storage so any phone or PC sees all devices.
+ */
+export async function syncDevicesFromCloud() {
+  try {
+    if (!isFirebaseConfigured()) return getDevices();
+    const cloudDevices = await getDevicesFirestore();
+    if (!cloudDevices || cloudDevices.length === 0) return getDevices();
+
+    const localDevices = getDevices();
+    const map = new Map();
+
+    // 1. Put local devices in map
+    localDevices.forEach(d => {
+      if (d && d.serial_number && !isDeviceBlacklisted(d.serial_number)) {
+        map.set(d.serial_number, d);
+      }
+    });
+
+    // 2. Merge cloud devices
+    cloudDevices.forEach(cd => {
+      if (cd && cd.serial_number && !isDeviceBlacklisted(cd.serial_number)) {
+        const existing = map.get(cd.serial_number);
+        if (existing) {
+          map.set(cd.serial_number, {
+            ...existing,
+            ...cd,
+            status: existing.status === 'online' ? 'online' : (cd.status || 'offline')
+          });
+        } else {
+          map.set(cd.serial_number, cd);
+        }
+      }
+    });
+
+    const merged = Array.from(map.values());
+    saveDevices(merged);
+    return merged;
+  } catch (e) {
+    console.warn('Sync devices from cloud failed:', e);
+    return getDevices();
+  }
+}
+
 export function upsertDevice(deviceData) {
   const devices = getDevices();
   const serial = deviceData.serial_number || deviceData.device_id;
   if (!serial) return devices;
 
+  let savedDevice = null;
   const idx = devices.findIndex(d => d.serial_number === serial);
   if (idx >= 0) {
     const isUserEdit = deviceData._userEdit === true;
@@ -122,20 +173,28 @@ export function upsertDevice(deviceData) {
         last_seen: deviceData.last_seen || new Date().toISOString()
       };
     }
+    savedDevice = devices[idx];
   } else {
-    devices.unshift({
+    savedDevice = {
       serial_number: serial,
-      client_name: deviceData.client_name || deviceData.plant || Site ,
+      client_name: deviceData.client_name || deviceData.plant || `Site ${serial}`,
       site_name: deviceData.site_name || 'Solar Site',
       location: deviceData.location || 'Unknown Location',
       inverter_model: deviceData.inverter_model || 'Solar Inverter',
-      capacity_kw: deviceData.capacity_kw || 50,
+      capacity_kw: Number(deviceData.capacity_kw) || 50,
       status: deviceData.status || 'online',
       last_seen: new Date().toISOString()
-    });
+    };
+    devices.unshift(savedDevice);
   }
 
   saveDevices(devices);
+
+  // Sync to Firestore cloud in background
+  if (isFirebaseConfigured() && savedDevice) {
+    saveDeviceFirestore(savedDevice).catch(() => {});
+  }
+
   return devices;
 }
 
@@ -149,6 +208,12 @@ export function deleteDevice(serial) {
     localStorage.removeItem('oes_live_' + serial);
     localStorage.removeItem('oes_telemetry_' + serial);
   } catch(e) {}
+
+  // Delete from Firestore in background
+  if (isFirebaseConfigured()) {
+    deleteDeviceFirestore(serial).catch(() => {});
+  }
+
   return devices;
 }
 

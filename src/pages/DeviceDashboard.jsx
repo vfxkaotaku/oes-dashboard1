@@ -21,7 +21,8 @@ import {
   getHistoricalAnalyticsDB,
   get10DayDailySummaries,
   export10DayCSV,
-  isFirebaseConfigured
+  isFirebaseConfigured,
+  syncDevicesFromCloud
 } from '../utils/storage';
 import { generateSolarPdfReport } from '../utils/pdfGenerator';
 
@@ -97,6 +98,12 @@ export default function DeviceDashboard() {
   useEffect(() => {
     const dev = getDeviceBySerial(serial);
     setDevice(dev);
+
+    // Sync from Firestore so device details/capacity are accurate on phones
+    syncDevicesFromCloud().then(devices => {
+      const found = devices.find(d => d.serial_number === serial);
+      if (found) setDevice(found);
+    });
     
     const cached = getLastLiveData(serial);
     if (cached) {
