@@ -5,7 +5,7 @@ import {
   MapPin, Edit, Trash2, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, X
 } from 'lucide-react';
 import mqtt from 'mqtt';
-import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, unblacklistDevice, recordDeviceTelemetry, saveLastLiveData, syncDevicesFromCloud, subscribeToCloudDevices } from '../utils/storage';
+import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, unblacklistDevice, recordDeviceTelemetry, saveLastLiveData, getLastLiveData, syncDevicesFromCloud, subscribeToCloudDevices } from '../utils/storage';
 
 export default function FleetView() {
   const navigate = useNavigate();
@@ -37,12 +37,16 @@ export default function FleetView() {
     const loaded = getDevices();
     setDevices(loaded);
 
-    // Initial last_seen map
+    // Initial last_seen map & cached live data (preserves stats even when logger Wi-Fi is off)
     const initialSeen = {};
+    const initialLive = {};
     loaded.forEach(d => {
-      initialSeen[d.serial_number] = d.last_seen ? new Date(d.last_seen).getTime() : Date.now();
+      initialSeen[d.serial_number] = d.last_seen ? new Date(d.last_seen).getTime() : 0;
+      const cached = getLastLiveData(d.serial_number);
+      if (cached) initialLive[d.serial_number] = cached;
     });
     setLastSeenMap(initialSeen);
+    setLiveData(initialLive);
 
     // Real-time live Firestore Cloud Sync (instantly updates across all phones & PCs)
     const unsubCloud = subscribeToCloudDevices((cloudDevices) => {
@@ -52,7 +56,17 @@ export default function FleetView() {
           const next = { ...prev };
           cloudDevices.forEach(d => {
             if (!next[d.serial_number]) {
-              next[d.serial_number] = d.last_seen ? new Date(d.last_seen).getTime() : Date.now();
+              next[d.serial_number] = d.last_seen ? new Date(d.last_seen).getTime() : 0;
+            }
+          });
+          return next;
+        });
+        setLiveData(prev => {
+          const next = { ...prev };
+          cloudDevices.forEach(d => {
+            if (!next[d.serial_number]) {
+              const cached = getLastLiveData(d.serial_number);
+              if (cached) next[d.serial_number] = cached;
             }
           });
           return next;
@@ -158,13 +172,21 @@ export default function FleetView() {
     // Heartbeat check interval: Mark devices offline if no message received in 60s
     const statusInterval = setInterval(() => {
       const currentTime = Date.now();
-      setDevices(prev => prev.map(d => {
-        const last = lastSeenMap[d.serial_number] || (d.last_seen ? new Date(d.last_seen).getTime() : 0);
-        if (d.status === 'online' && currentTime - last > 60000) {
-          return { ...d, status: 'offline' };
+      setDevices(prev => {
+        let changed = false;
+        const next = prev.map(d => {
+          const last = lastSeenMap[d.serial_number] || (d.last_seen ? new Date(d.last_seen).getTime() : 0);
+          if (d.status === 'online' && currentTime - last > 60000) {
+            changed = true;
+            return { ...d, status: 'offline' };
+          }
+          return d;
+        });
+        if (changed) {
+          saveDevices(next);
         }
-        return d;
-      }));
+        return next;
+      });
     }, 5000);
 
     return () => {
@@ -389,7 +411,7 @@ export default function FleetView() {
             )
           ) : (
             filtered.map(dev => {
-              const live = liveData[dev.serial_number];
+              const live = liveData[dev.serial_number] || getLastLiveData(dev.serial_number);
               let liveKw = '--';
               let todayKwh = '--';
               
@@ -404,6 +426,9 @@ export default function FleetView() {
               }
 
               const isOnline = dev.status === 'online';
+              if (!isOnline && liveKw !== '--') {
+                liveKw = '0.00';
+              }
 
               return (
                 <div 
