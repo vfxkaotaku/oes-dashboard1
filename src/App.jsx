@@ -4,6 +4,7 @@ import { Sun, Activity, ShieldCheck, Layers, HelpCircle, Settings, X, Cloud, Har
 import FleetView from './pages/FleetView';
 import DeviceDashboard from './pages/DeviceDashboard';
 import { isFirebaseConfigured, getFirebaseConfig, saveFirebaseConfig, resetAllFleetData, DEFAULT_FIREBASE_CONFIG, saveGlobalSettingsFirestore, subscribeGlobalSettingsFirestore } from './utils/storage';
+import { getSafeMqttUrl } from './utils/mqttHelper';
 import './index.css';
 
 // Helper to parse both pure JSON and Firebase JS snippet (const firebaseConfig = { ... })
@@ -42,8 +43,14 @@ function parseFirebaseInput(raw) {
 
 function App() {
   const [showSettings, setShowSettings] = useState(false);
-  const [mqttHost, setMqttHost] = useState(localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt');
-  const [mqttPrefix, setMqttPrefix] = useState(localStorage.getItem('oes_mqtt_prefix') || 'oes');
+  const [mqttHost, setMqttHost] = useState(() => {
+    const saved = localStorage.getItem('oes_mqtt_host');
+    if (saved) return saved;
+    const isLocalhost = typeof window !== 'undefined' && 
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    return isLocalhost ? `ws://${window.location.hostname}:8083` : 'wss://broker.emqx.io:8084/mqtt';
+  });
+  const [mqttPrefix, setMqttPrefix] = useState(() => localStorage.getItem('oes_mqtt_prefix') || 'inverter');
 
   // Firebase Config State
   const [firebaseConfigStr, setFirebaseConfigStr] = useState(() => {
@@ -80,8 +87,10 @@ function App() {
   }, []);
 
   const handleSaveSettings = async () => {
-    localStorage.setItem('oes_mqtt_host', mqttHost);
-    localStorage.setItem('oes_mqtt_prefix', mqttPrefix);
+    const safeHost = getSafeMqttUrl(mqttHost);
+    localStorage.setItem('oes_mqtt_host', safeHost);
+    localStorage.setItem('oes_mqtt_prefix', mqttPrefix.trim() || 'inverter');
+    setMqttHost(safeHost);
 
     let parsed = null;
     let isDisabled = false;
@@ -216,8 +225,34 @@ function App() {
                       value={mqttHost}
                       onChange={(e) => setMqttHost(e.target.value)}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-oes-blue font-mono"
-                      placeholder="wss://broker.emqx.io:8084/mqtt"
+                      placeholder="ws://localhost:8083 or wss://broker.emqx.io:8084/mqtt"
                     />
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      <button 
+                        type="button" 
+                        onClick={() => { setMqttHost('ws://localhost:8083'); setMqttPrefix('inverter'); }}
+                        className="px-2 py-1 bg-blue-50 text-oes-blue hover:bg-blue-100 rounded-md text-[10px] font-semibold"
+                      >
+                        ⚡ Local Dev Bridge (ws://localhost:8083)
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => { setMqttHost('ws://72.62.247.124:9001'); setMqttPrefix('inverter'); }}
+                        className="px-2 py-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-md text-[10px] font-semibold"
+                      >
+                        Server WS (ws://72.62.247.124:9001)
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => { setMqttHost('wss://broker.emqx.io:8084/mqtt'); setMqttPrefix('oes'); }}
+                        className="px-2 py-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-md text-[10px] font-semibold"
+                      >
+                        EMQX Cloud
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-normal">
+                      <span className="font-semibold text-slate-600">Note:</span> Browsers require WebSockets (<span className="font-mono">ws://</span> or <span className="font-mono">wss://</span>). When testing locally, the dev bridge automatically connects to your TCP MQTT broker at <span className="font-mono">72.62.247.124:1883</span>.
+                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <label className="font-bold text-slate-500 uppercase tracking-wider text-[10px]">MQTT Topic Prefix</label>
@@ -226,7 +261,7 @@ function App() {
                       value={mqttPrefix}
                       onChange={(e) => setMqttPrefix(e.target.value)}
                       className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-oes-blue font-mono"
-                      placeholder="oes"
+                      placeholder="inverter"
                     />
                   </div>
                 </div>

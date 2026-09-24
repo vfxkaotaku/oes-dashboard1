@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "bridge": "node mqtt_ws_bridge.cjs",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",

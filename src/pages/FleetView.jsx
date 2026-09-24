@@ -5,6 +5,7 @@ import {
   MapPin, Edit, Trash2, ArrowUpRight, CheckCircle2, AlertCircle, RefreshCw, X
 } from 'lucide-react';
 import mqtt from 'mqtt';
+import { getSafeMqttUrl } from '../utils/mqttHelper';
 import { getDevices, saveDevices, upsertDevice, deleteDevice, isDeviceBlacklisted, unblacklistDevice, recordDeviceTelemetry, saveLastLiveData, getLastLiveData, syncDevicesFromCloud, subscribeToCloudDevices } from '../utils/storage';
 
 export default function FleetView() {
@@ -15,6 +16,8 @@ export default function FleetView() {
   const [liveData, setLiveData] = useState({});
   const [lastSeenMap, setLastSeenMap] = useState({});
   const [mqttDebugLogs, setMqttDebugLogs] = useState([]);
+  const [mqttStatus, setMqttStatus] = useState('connecting'); // 'connecting' | 'connected' | 'error' | 'disconnected'
+  const [activeBrokerUrl, setActiveBrokerUrl] = useState('');
   
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -75,99 +78,124 @@ export default function FleetView() {
     });
 
     // Connect to WebSocket MQTT Broker
-    const mqttHost = localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt';
-    const mqttPrefix = localStorage.getItem('oes_mqtt_prefix') || 'oes';
+    const rawHost = localStorage.getItem('oes_mqtt_host');
+    const mqttHost = getSafeMqttUrl(rawHost);
+    setActiveBrokerUrl(mqttHost);
+    const mqttPrefix = localStorage.getItem('oes_mqtt_prefix') || 'inverter';
     
-    const client = mqtt.connect(mqttHost);
-    
-    client.on('connect', () => {
-      console.log(`FleetView: Connected to MQTT Broker (${mqttHost})`);
-      client.subscribe(`${mqttPrefix}/#`);
-    });
-
-    client.on('message', (topic, message) => {
-      setMqttDebugLogs(prev => {
-        const newLogs = [`${new Date().toISOString().substring(11, 19)} | ${topic}`, ...prev];
-        return newLogs.slice(0, 5);
+    let client = null;
+    try {
+      client = mqtt.connect(mqttHost, { reconnectPeriod: 4000, connectTimeout: 6000 });
+      
+      client.on('connect', () => {
+        console.log(`FleetView: Connected to MQTT Broker (${mqttHost})`);
+        setMqttStatus('connected');
+        client.subscribe(`${mqttPrefix}/#`);
+        if (mqttPrefix !== 'inverter') client.subscribe('inverter/#');
+        if (mqttPrefix !== 'oes') client.subscribe('oes/#');
       });
-      try {
-        const parts = topic.split('/');
-        // Supported topic formats:
-        //  oes/logger/DEVICE_ID/telemetry   (legacy simulator)
-        //  oes/DEVICE_ID/live               (legacy ESP32)
-        //  PREFIX/DEVICE_ID/telemetry       (standard)
-        let serial = '';
-        let type = '';
 
-        if (parts[0] === 'oes' && parts[1] === 'logger' && parts.length >= 4) {
-          // Legacy: oes/logger/DEVICE_ID/type
-          serial = parts[2];
-          type = parts[3];
-        } else if (parts.length >= 3) {
-          // Standard: PREFIX/DEVICE_ID/type
-          serial = parts[1];
-          type = parts[2];
-        }
+      client.on('error', (err) => {
+        console.warn('FleetView MQTT connection error:', err.message);
+        setMqttStatus('error');
+      });
 
-        if (!serial || isDeviceBlacklisted(serial)) return;
-        const now = Date.now();
-        setLastSeenMap(prev => ({ ...prev, [serial]: now }));
-        
-        let data = {};
+      client.on('close', () => {
+        setMqttStatus('disconnected');
+      });
+
+      client.on('reconnect', () => {
+        setMqttStatus('connecting');
+      });
+
+      client.on('message', (topic, message) => {
+        setMqttDebugLogs(prev => {
+          const newLogs = [`${new Date().toISOString().substring(11, 19)} | ${topic}`, ...prev];
+          return newLogs.slice(0, 5);
+        });
         try {
-          data = JSON.parse(message.toString());
+          const parts = topic.split('/');
+          // Supported topic formats:
+          //  oes/logger/DEVICE_ID/telemetry   (legacy simulator)
+          //  oes/DEVICE_ID/live               (legacy ESP32)
+          //  PREFIX/DEVICE_ID/telemetry       (standard)
+          let serial = '';
+          let type = '';
+
+          if (parts[0] === 'oes' && parts[1] === 'logger' && parts.length >= 4) {
+            serial = parts[2];
+            type = parts[3];
+          } else if (parts.length >= 3) {
+            serial = parts[1];
+            type = parts[2];
+          } else if (parts.length === 2) {
+            serial = parts[1];
+            type = 'telemetry';
+          }
+
+          if (!serial || isDeviceBlacklisted(serial)) return;
+          const now = Date.now();
+          setLastSeenMap(prev => ({ ...prev, [serial]: now }));
+          
+          let data = {};
+          try {
+            data = JSON.parse(message.toString());
+          } catch (e) {
+            setMqttDebugLogs(prev => {
+              const newLogs = ['ERROR parsing JSON for ' + topic, ...prev];
+              return newLogs.slice(0, 5);
+            });
+            return;
+          }
+
+          // Auto-register discovered logger if not present, and update status across state & Firestore
+          const syncOrRegisterDevice = (devInfo, defaultStatus = 'online') => {
+            setDevices(prev => {
+              const existing = prev.find(d => d.serial_number === serial);
+              if (!existing) {
+                const invCount = devInfo.inv?.length || devInfo.values?.inverters?.length || 0;
+                const newDev = {
+                  serial_number: serial,
+                  client_name: devInfo.device_name || devInfo.plant || ('Logger ' + serial),
+                  site_name: devInfo.site_name || 'Solar Site',
+                  location: devInfo.location || 'Site Location',
+                  inverter_model: invCount > 1 ? (`Multi-Inverter (${invCount})`) : (devInfo.inverter_model || 'Solar Inverter'),
+                  capacity_kw: Number(devInfo.capacity_kw) || 50,
+                  status: defaultStatus,
+                  last_seen: new Date().toISOString()
+                };
+                upsertDevice(newDev);
+                return [newDev, ...prev];
+              } else {
+                const updatedStatus = defaultStatus || existing.status || 'online';
+                return prev.map(d => d.serial_number === serial ? {
+                  ...d,
+                  status: updatedStatus,
+                  last_seen: new Date().toISOString()
+                } : d);
+              }
+            });
+          };
+
+          if (type === 'telemetry' || type === 'live' || data.ac_w !== undefined || data.inv !== undefined || data.values !== undefined) {
+            setLiveData(prev => ({ ...prev, [serial]: data }));
+            recordDeviceTelemetry(serial, data);
+            saveLastLiveData(serial, data);
+            syncOrRegisterDevice(data, 'online');
+          } else if (type === 'status') {
+            const isOnline = data.online === true || data.online === 1 || data.online === 'true';
+            syncOrRegisterDevice(data, isOnline ? 'online' : 'offline');
+          } else if (type === 'heartbeat' || type === 'config') {
+            syncOrRegisterDevice(data, 'online');
+          }
         } catch (e) {
-          // Add error log to UI
-          setMqttDebugLogs(prev => {
-            const newLogs = ['ERROR parsing JSON for ' + topic, ...prev];
-            return newLogs.slice(0, 5);
-          });
-          return;
+          // Ignore parsing errors on malformed messages
         }
-
-        // Auto-register discovered logger if not present, and update status across state & Firestore
-        const syncOrRegisterDevice = (devInfo, defaultStatus = 'online') => {
-          setDevices(prev => {
-            const existing = prev.find(d => d.serial_number === serial);
-            if (!existing) {
-              const newDev = {
-                serial_number: serial,
-                client_name: devInfo.device_name || devInfo.plant || ('Logger ' + serial),
-                site_name: devInfo.site_name || 'Solar Site',
-                location: devInfo.location || 'Site Location',
-                inverter_model: devInfo.inv ? ('Multi-Inverter (' + devInfo.inv.length + ')') : (devInfo.inverter_model || 'Solar Inverter'),
-                capacity_kw: Number(devInfo.capacity_kw) || 50,
-                status: defaultStatus,
-                last_seen: new Date().toISOString()
-              };
-              upsertDevice(newDev); // Automatically saves to localStorage and syncs to Firestore!
-              return [newDev, ...prev];
-            } else {
-              const updatedStatus = defaultStatus || existing.status || 'online';
-              return prev.map(d => d.serial_number === serial ? {
-                ...d,
-                status: updatedStatus,
-                last_seen: new Date().toISOString()
-              } : d);
-            }
-          });
-        };
-
-        if (type === 'telemetry' || type === 'live') {
-          setLiveData(prev => ({ ...prev, [serial]: data }));
-          recordDeviceTelemetry(serial, data);
-          saveLastLiveData(serial, data); // Cache for instant DeviceDashboard load
-          syncOrRegisterDevice(data, 'online');
-        } else if (type === 'status') {
-          const isOnline = data.online === true || data.online === 1;
-          syncOrRegisterDevice(data, isOnline ? 'online' : 'offline');
-        } else if (type === 'heartbeat' || type === 'config') {
-          syncOrRegisterDevice(data, 'online');
-        }
-      } catch (e) {
-        // Ignore parsing errors on malformed messages
-      }
-    });
+      });
+    } catch (err) {
+      console.warn('FleetView MQTT init error:', err);
+      setMqttStatus('error');
+    }
 
     // Heartbeat check interval: Mark devices offline if no message received in 60s
     const statusInterval = setInterval(() => {
@@ -190,7 +218,9 @@ export default function FleetView() {
     }, 5000);
 
     return () => {
-      client.end();
+      if (client) {
+        try { client.end(); } catch (e) {}
+      }
       clearInterval(statusInterval);
     };
   }, []);
@@ -259,12 +289,17 @@ export default function FleetView() {
   devices.forEach(dev => {
     if (dev.status === 'online') onlineCount++;
     const live = liveData[dev.serial_number];
-    if (live && live.inv) {
+    if (live && live.inv && Array.isArray(live.inv)) {
       totalFleetKw += live.inv.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0) / 1000;
       totalFleetKwh += live.inv.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0);
+    } else if (live && live.values?.inverters && Array.isArray(live.values.inverters)) {
+      totalFleetKw += live.values.inverters.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0) / 1000;
+      totalFleetKwh += live.values.inverters.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0);
     } else if (live) {
-      totalFleetKw += (parseFloat(live.ac_w) || 0) / 1000;
-      totalFleetKwh += parseFloat(live.e_day) || 0;
+      const w = parseFloat(live.values?.ac_w ?? live.ac_w) || 0;
+      const kwh = parseFloat(live.values?.e_day ?? live.e_day) || 0;
+      totalFleetKw += w / 1000;
+      totalFleetKwh += kwh;
     }
   });
 
@@ -327,10 +362,17 @@ export default function FleetView() {
 
         <div className="bg-white p-4 md:p-5 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] flex flex-col md:flex-row md:items-center justify-between gap-3 transition-transform hover:-translate-y-1">
           <div className="order-2 md:order-1">
-            <div className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider">Cloud Broker</div>
-            <div className="text-xs md:text-sm font-semibold text-slate-800 mt-0.5 md:mt-1 truncate max-w-[100px] md:max-w-none">EMQX Cloud</div>
-            <div className="text-[9px] md:text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-0.5 md:mt-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Connected
+            <div className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-wider">MQTT Broker</div>
+            <div className="text-xs md:text-sm font-semibold text-slate-800 mt-0.5 md:mt-1 truncate max-w-[140px] md:max-w-none" title={activeBrokerUrl}>
+              {activeBrokerUrl.replace(/^wss?:\/\//, '').split('/')[0] || 'MQTT Server'}
+            </div>
+            <div className={`text-[9px] md:text-[10px] font-bold flex items-center gap-1 mt-0.5 md:mt-1 ${
+              mqttStatus === 'connected' ? 'text-emerald-600' : mqttStatus === 'connecting' ? 'text-amber-600' : 'text-rose-600'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                mqttStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : mqttStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'
+              }`}></span>
+              {mqttStatus === 'connected' ? 'Connected' : mqttStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
             </div>
           </div>
           <div className="order-1 md:order-2 bg-gradient-to-br from-orange-100 to-orange-50 text-orange-600 p-2.5 md:p-3 rounded-xl self-start md:self-auto">
@@ -415,14 +457,21 @@ export default function FleetView() {
               let liveKw = '--';
               let todayKwh = '--';
               
-              if (live && live.inv) {
+              if (live && live.inv && Array.isArray(live.inv)) {
                 const totalKw = live.inv.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0) / 1000;
                 liveKw = totalKw.toFixed(2);
                 const totalKwh = live.inv.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0);
                 todayKwh = totalKwh.toFixed(1);
+              } else if (live && live.values?.inverters && Array.isArray(live.values.inverters)) {
+                const totalKw = live.values.inverters.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0) / 1000;
+                liveKw = totalKw.toFixed(2);
+                const totalKwh = live.values.inverters.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0);
+                todayKwh = totalKwh.toFixed(1);
               } else if (live) {
-                liveKw = ((parseFloat(live.ac_w) || 0) / 1000).toFixed(2);
-                todayKwh = (parseFloat(live.e_day) || 0).toFixed(1);
+                const w = parseFloat(live.values?.ac_w ?? live.ac_w) || 0;
+                const kwh = parseFloat(live.values?.e_day ?? live.e_day) || 0;
+                liveKw = (w / 1000).toFixed(2);
+                todayKwh = kwh.toFixed(1);
               }
 
               const isOnline = dev.status === 'online';
@@ -499,14 +548,21 @@ export default function FleetView() {
                 let liveKw = '--';
                 let todayKwh = '--';
                 
-                if (live && live.inv) {
+                if (live && live.inv && Array.isArray(live.inv)) {
                   const totalKw = live.inv.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0) / 1000;
                   liveKw = totalKw.toFixed(2);
                   const totalKwh = live.inv.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0);
                   todayKwh = totalKwh.toFixed(1);
+                } else if (live && live.values?.inverters && Array.isArray(live.values.inverters)) {
+                  const totalKw = live.values.inverters.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0) / 1000;
+                  liveKw = totalKw.toFixed(2);
+                  const totalKwh = live.values.inverters.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0);
+                  todayKwh = totalKwh.toFixed(1);
                 } else if (live) {
-                  liveKw = ((parseFloat(live.ac_w) || 0) / 1000).toFixed(2);
-                  todayKwh = (parseFloat(live.e_day) || 0).toFixed(1);
+                  const w = parseFloat(live.values?.ac_w ?? live.ac_w) || 0;
+                  const kwh = parseFloat(live.values?.e_day ?? live.e_day) || 0;
+                  liveKw = (w / 1000).toFixed(2);
+                  todayKwh = kwh.toFixed(1);
                 }
 
                 const isOnline = dev.status === 'online';

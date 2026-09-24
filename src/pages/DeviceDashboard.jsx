@@ -7,6 +7,7 @@ import {
   FileSpreadsheet, CalendarDays, History, Sparkles, Check, HardDrive, Cloud
 } from 'lucide-react';
 import mqtt from 'mqtt';
+import { getSafeMqttUrl } from '../utils/mqttHelper';
 import { 
   ResponsiveContainer, Tooltip, PieChart, Pie, Cell,
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid
@@ -111,53 +112,64 @@ export default function DeviceDashboard() {
       setIsOnline(true);
     }
     
-    const mqttHost = localStorage.getItem('oes_mqtt_host') || 'wss://broker.emqx.io:8084/mqtt';
-    const mqttPrefix = localStorage.getItem('oes_mqtt_prefix') || 'oes';
+    const rawHost = localStorage.getItem('oes_mqtt_host');
+    const mqttHost = getSafeMqttUrl(rawHost);
+    const mqttPrefix = localStorage.getItem('oes_mqtt_prefix') || 'inverter';
 
     console.log('DeviceDashboard: Connecting to MQTT ' + mqttHost + ' for device ' + serial);
-    const client = mqtt.connect(mqttHost);
+    let client = null;
+    try {
+      client = mqtt.connect(mqttHost, { reconnectPeriod: 4000, connectTimeout: 6000 });
 
-    client.on('connect', () => {
-      console.log('DeviceDashboard: Connected to MQTT for ' + serial);
-      client.subscribe(mqttPrefix + '/#');
-      client.subscribe('oes/#');
-    });
+      client.on('connect', () => {
+        console.log('DeviceDashboard: Connected to MQTT for ' + serial);
+        client.subscribe(mqttPrefix + '/#');
+        if (mqttPrefix !== 'inverter') client.subscribe('inverter/#');
+        if (mqttPrefix !== 'oes') client.subscribe('oes/#');
+      });
 
-    client.on('message', (topic, message) => {
-      try {
-        const parts = topic.split('/');
-        let msgSerial = '';
-        let type = '';
+      client.on('error', (err) => {
+        console.warn('DeviceDashboard MQTT error:', err.message);
+      });
 
-        if (parts[0] === 'oes' && parts[1] === 'logger' && parts.length >= 4) {
-          msgSerial = parts[2];
-          type = parts[3];
-        } else if (parts.length >= 3) {
-          msgSerial = parts[1];
-          type = parts[2];
-        } else if (parts.length === 2) {
-          msgSerial = parts[1];
-          type = 'telemetry';
+      client.on('message', (topic, message) => {
+        try {
+          const parts = topic.split('/');
+          let msgSerial = '';
+          let type = '';
+
+          if (parts[0] === 'oes' && parts[1] === 'logger' && parts.length >= 4) {
+            msgSerial = parts[2];
+            type = parts[3];
+          } else if (parts.length >= 3) {
+            msgSerial = parts[1];
+            type = parts[2];
+          } else if (parts.length === 2) {
+            msgSerial = parts[1];
+            type = 'telemetry';
+          }
+
+          if (!msgSerial || msgSerial.toLowerCase() !== serial.toLowerCase()) return;
+
+          const data = JSON.parse(message.toString());
+          const now = Date.now();
+          setLastSeen(now);
+          setIsOnline(true);
+
+          if (type === 'telemetry' || type === 'live' || !type || data.ac_w !== undefined || data.inv !== undefined || data.values !== undefined) {
+            setLiveData(data);
+            saveLastLiveData(serial, data);
+            recordDeviceTelemetry(serial, data);
+          } else if (type === 'status') {
+            setIsOnline(data.online === true || data.online === 1 || data.online === 'true');
+          }
+        } catch (e) {
+          console.error('DeviceDashboard MQTT parse error:', e);
         }
-
-        if (!msgSerial || msgSerial.toLowerCase() !== serial.toLowerCase()) return;
-
-        const data = JSON.parse(message.toString());
-        const now = Date.now();
-        setLastSeen(now);
-        setIsOnline(true);
-
-        if (type === 'telemetry' || type === 'live' || !type || data.ac_w !== undefined || data.inv !== undefined) {
-          setLiveData(data);
-          saveLastLiveData(serial, data);
-          recordDeviceTelemetry(serial, data);
-        } else if (type === 'status') {
-          setIsOnline(data.online === true || data.online === 1 || data.online === 'true');
-        }
-      } catch (e) {
-        console.error('DeviceDashboard MQTT parse error:', e);
-      }
-    });
+      });
+    } catch (e) {
+      console.warn('DeviceDashboard MQTT init error:', e);
+    }
 
     const timer = setInterval(() => {
       setLastSeen(prev => {
@@ -169,7 +181,9 @@ export default function DeviceDashboard() {
     }, 5000);
 
     return () => {
-      client.end();
+      if (client) {
+        try { client.end(); } catch (e) {}
+      }
       clearInterval(timer);
     };
   }, [serial]);
@@ -241,15 +255,15 @@ export default function DeviceDashboard() {
     return { ...rawData, ...ZERO_DATA };
   })();
 
-  const isMulti = Array.isArray(displayData) || (displayData.inv && Array.isArray(displayData.inv));
-  const inverters = Array.isArray(displayData) ? displayData : (displayData.inv ? displayData.inv : [displayData]);
+  const isMulti = Array.isArray(displayData) || (displayData.inv && Array.isArray(displayData.inv)) || (displayData.values?.inverters && Array.isArray(displayData.values.inverters));
+  const inverters = Array.isArray(displayData) ? displayData : (displayData.inv ? displayData.inv : (displayData.values?.inverters ? displayData.values.inverters : [displayData]));
   const isCombined = viewMode === 'combined';
   const currentInv = isCombined ? inverters[0] : inverters[parseInt(viewMode)] || inverters[0];
 
-  const ac_w = isCombined ? inverters.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0) : (parseFloat(currentInv.ac_w) || 0);
-  const pv_w = isCombined ? inverters.reduce((s, i) => s + (parseFloat(i.pv_w) || 0), 0) : (parseFloat(currentInv.pv_w) || 0);
-  const e_day = isCombined ? inverters.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0) : (parseFloat(currentInv.e_day) || 0);
-  const e_tot = isCombined ? inverters.reduce((s, i) => s + (parseFloat(i.e_tot) || 0), 0) : (parseFloat(currentInv.e_tot) || 0);
+  const ac_w = isCombined ? (displayData.values?.ac_w ?? inverters.reduce((s, i) => s + (parseFloat(i.ac_w) || 0), 0)) : (parseFloat(currentInv.ac_w) || 0);
+  const pv_w = isCombined ? (displayData.values?.pv_w ?? inverters.reduce((s, i) => s + (parseFloat(i.pv_w) || 0), 0)) : (parseFloat(currentInv.pv_w) || 0);
+  const e_day = isCombined ? (displayData.values?.e_day ?? inverters.reduce((s, i) => s + (parseFloat(i.e_day) || 0), 0)) : (parseFloat(currentInv.e_day) || 0);
+  const e_tot = isCombined ? (displayData.values?.e_tot ?? inverters.reduce((s, i) => s + (parseFloat(i.e_tot) || 0), 0)) : (parseFloat(currentInv.e_tot) || 0);
 
   const powerKW = (ac_w / 1000).toFixed(2);
 
@@ -273,6 +287,22 @@ export default function DeviceDashboard() {
             });
           }
         });
+      });
+    } else if (inv.strings && typeof inv.strings === 'object') {
+      Object.keys(inv.strings).forEach(key => {
+        if (key.startsWith('str') && key.endsWith('_v')) {
+          const sid = key.replace('str', '').replace('_v', '');
+          const v = parseFloat(inv.strings[key]) || 0;
+          const a = parseFloat(inv.strings[`str${sid}_a`]) || 0;
+          if (v > 0 || a > 0) {
+            allStrings.push({
+              name: isMulti ? `Inv${invIdx + 1}-Str${sid}` : `String ${sid}`,
+              voltage: v,
+              current: a,
+              value: v * a
+            });
+          }
+        }
       });
     } else {
       Object.keys(inv).forEach(key => {
